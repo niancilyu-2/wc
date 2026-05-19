@@ -206,6 +206,19 @@ async function loadReferenceData() {
   state.teamsByCode = Object.fromEntries(teams.map((t) => [t.code, t]));
 }
 
+async function loadCurrentPlayer() {
+  const { data, error } = await supabase
+    .from('players')
+    .select('*')
+    .eq('id', state.player.id)
+    .single();
+  if (error) {
+    console.error('Failed to refresh player', error);
+    return;
+  }
+  state.player = { ...state.player, ...data };
+}
+
 async function loadMyPicks() {
   const [groupRes, brktRes] = await Promise.all([
     supabase.from('group_picks').select('*').eq('player_id', state.player.id),
@@ -285,6 +298,7 @@ async function saveGroupPick(groupCode, slot, teamCode) {
 
   state.picks.groups[groupCode] = current;
   renderGroupCard(groupCode);
+  renderGroupsActions();
   renderStatusBar();
 
   const isEmpty = current.first === null && current.second === null;
@@ -360,6 +374,178 @@ function renderGroupPicks() {
     const btn = e.target.closest('.rank-btn');
     if (!btn || isGroupsLocked()) return;
     saveGroupPick(btn.dataset.group, btn.dataset.slot, btn.dataset.team);
+  });
+}
+
+// ---------- Group picks: auto-fill, submit/complete, controls ----------
+
+function shuffled(arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+async function autoFillEmptyGroups() {
+  if (isGroupsLocked()) return;
+  const rows = [];
+  for (const group of state.groups) {
+    const existing = state.picks.groups[group.code];
+    if (existing && (existing.first || existing.second)) continue;
+    const shuffledTeams = shuffled(state.teamsByGroup[group.code] || []);
+    if (shuffledTeams.length < 2) continue;
+    const first = shuffledTeams[0].code;
+    const second = shuffledTeams[1].code;
+    state.picks.groups[group.code] = { first, second };
+    rows.push({
+      player_id: state.player.id,
+      group_code: group.code,
+      first_code: first,
+      second_code: second,
+      updated_at: new Date().toISOString(),
+    });
+  }
+  if (rows.length === 0) return;
+  const { error } = await supabase
+    .from('group_picks')
+    .upsert(rows, { onConflict: 'player_id,group_code' });
+  if (error) console.error('Auto-pick save failed', error);
+  renderGroupPicks();
+  renderGroupsActions();
+  renderStatusBar();
+}
+
+async function setGroupsSubmitted(submitted) {
+  const newValue = submitted ? new Date().toISOString() : null;
+  const { error } = await supabase
+    .from('players')
+    .update({ groups_submitted_at: newValue })
+    .eq('id', state.player.id);
+  if (error) {
+    console.error('Failed to update submission state', error);
+    return;
+  }
+  state.player.groups_submitted_at = newValue;
+  renderGroupsActions();
+  renderStatusBar();
+  updateNavigationGuards();
+}
+
+function groupsCompletePicks() {
+  return Object.values(state.picks.groups).filter((p) => p.first && p.second).length;
+}
+
+function renderGroupsActions() {
+  const container = document.getElementById('groups-actions');
+  if (!container) return;
+  const stage = getStage();
+  if (stage !== 'groups-open') {
+    container.innerHTML = state.player.groups_submitted_at
+      ? `<span class="completed-badge">✓ Submitted</span>`
+      : `<span class="completed-badge completed-badge--warn">Group picks not submitted before lock</span>`;
+    return;
+  }
+  const completed = groupsCompletePicks();
+  const submitted = !!state.player.groups_submitted_at;
+  const allDone = completed === 12;
+  container.innerHTML = `
+    <button type="button" class="btn-secondary" id="auto-pick-btn">🎲 Auto-pick empty groups</button>
+    ${
+      submitted
+        ? `<span class="completed-badge">✓ Submitted</span>
+           <button type="button" class="btn-link" id="edit-groups-btn">Edit picks</button>`
+        : `<button type="button" class="btn-primary" id="complete-groups-btn" ${allDone ? '' : 'disabled'}>
+             ${allDone ? 'Save / Complete group picks' : `Pick all 12 groups (${completed} / 12)`}
+           </button>`
+    }
+  `;
+}
+
+function wireGroupsActions() {
+  document.getElementById('groups-actions').addEventListener('click', async (e) => {
+    if (e.target.id === 'auto-pick-btn') {
+      await autoFillEmptyGroups();
+    } else if (e.target.id === 'complete-groups-btn') {
+      await setGroupsSubmitted(true);
+    } else if (e.target.id === 'edit-groups-btn') {
+      await setGroupsSubmitted(false);
+    }
+  });
+}
+
+// ---------- Navigation guards (beforeunload + internal link intercept) ----------
+
+function shouldWarnOnLeave() {
+  const stage = getStage();
+  if (stage === 'groups-open' && !state.player.groups_submitted_at) return true;
+  if (stage === 'bracket-open' && !state.player.bracket_submitted_at) return true;
+  return false;
+}
+
+function beforeUnloadHandler(e) {
+  e.preventDefault();
+  e.returnValue = '';
+  return '';
+}
+
+function updateNavigationGuards() {
+  window.removeEventListener('beforeunload', beforeUnloadHandler);
+  if (shouldWarnOnLeave()) {
+    window.addEventListener('beforeunload', beforeUnloadHandler);
+  }
+}
+
+function showLeaveSiteModal(targetHref) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    root.innerHTML = `
+      <div class="modal-overlay">
+        <div class="modal">
+          <h2>You haven't saved your progress</h2>
+          <p>Your picks are auto-saved to the database, but you haven't hit <strong>Complete</strong> yet. Save now and continue, or leave without saving?</p>
+          <div class="modal-actions">
+            <button type="button" class="btn-primary" id="leave-save">Save &amp; continue</button>
+            <button type="button" class="btn-secondary" id="leave-go">Leave without saving</button>
+            <button type="button" class="btn-link" id="leave-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const finish = (decision) => {
+      root.innerHTML = '';
+      resolve(decision);
+    };
+    document.getElementById('leave-save').addEventListener('click', async () => {
+      const stage = getStage();
+      if (stage === 'groups-open') await setGroupsSubmitted(true);
+      if (stage === 'bracket-open') {
+        // bracket submit lands in 2e; for now still treat as save.
+        // No-op: leave a placeholder so future work fills it in.
+      }
+      finish('save');
+    });
+    document.getElementById('leave-go').addEventListener('click', () => finish('go'));
+    document.getElementById('leave-cancel').addEventListener('click', () => finish('cancel'));
+  });
+}
+
+function wireInternalLinkGuards() {
+  document.addEventListener('click', async (e) => {
+    if (!shouldWarnOnLeave()) return;
+    const anchor = e.target.closest('a[href]');
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+    const url = new URL(href, location.href);
+    if (url.origin !== location.origin) return;
+    if (url.pathname === location.pathname) return;
+    e.preventDefault();
+    const decision = await showLeaveSiteModal(href);
+    if (decision === 'cancel') return;
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    location.href = href;
   });
 }
 
@@ -584,13 +770,17 @@ async function init() {
   state.player = player;
 
   renderUserBar();
-  await loadReferenceData();
+  await Promise.all([loadReferenceData(), loadCurrentPlayer()]);
   await loadMyPicks();
   renderStatusBar();
   renderGroupPicks();
+  renderGroupsActions();
+  wireGroupsActions();
   renderBracket();
   wireBracketListener();
   renderLeaderboardPlaceholder();
+  wireInternalLinkGuards();
+  updateNavigationGuards();
 }
 
 document.addEventListener('DOMContentLoaded', init);

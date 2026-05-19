@@ -463,6 +463,97 @@ main {
 .pick-status.partial { color: var(--warn); }
 .pick-status.empty { color: var(--text-muted); }
 
+/* ---- Picks controls (auto-pick / complete / edit) ---- */
+
+.picks-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.btn-primary,
+.btn-secondary,
+.btn-link {
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0.6rem 1rem;
+  letter-spacing: 0.02em;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+.btn-primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.btn-primary:disabled {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  border-color: var(--accent);
+}
+
+.btn-link {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 0.5rem 0.25rem;
+  text-decoration: underline;
+}
+.btn-link:hover {
+  color: var(--text);
+}
+
+.completed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  background: rgba(0, 184, 107, 0.18);
+  border: 1px solid var(--accent-2);
+  border-radius: 4px;
+  color: var(--accent-2);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.completed-badge--warn {
+  background: rgba(245, 180, 0, 0.18);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* Modal actions row (Save & continue / Leave / Cancel) */
+.modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.modal-actions .btn-primary,
+.modal-actions .btn-secondary,
+.modal-actions .btn-link {
+  flex: 0 0 auto;
+}
+
 /* ---- Bracket ---- */
 
 #bracket {

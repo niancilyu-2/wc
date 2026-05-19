@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS players (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT UNIQUE NOT NULL,
   is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+  groups_submitted_at TIMESTAMPTZ,
+  bracket_submitted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -136,9 +138,10 @@ CREATE POLICY "groups_read"  ON groups  FOR SELECT USING (true);
 CREATE POLICY "teams_read"   ON teams   FOR SELECT USING (true);
 CREATE POLICY "matches_read" ON matches FOR SELECT USING (true);
 
--- Players: read + self-signup (insert), no updates/deletes from anon.
-CREATE POLICY "players_read"   ON players FOR SELECT USING (true);
-CREATE POLICY "players_insert" ON players FOR INSERT WITH CHECK (true);
+-- Players: read + self-signup + updating submission timestamps (trust-based).
+CREATE POLICY "players_read"              ON players FOR SELECT USING (true);
+CREATE POLICY "players_insert"            ON players FOR INSERT WITH CHECK (true);
+CREATE POLICY "players_update_submission" ON players FOR UPDATE USING (true) WITH CHECK (true);
 
 -- Picks: full read + write for anon (trust-based).
 -- App enforces "only your own picks" and "hidden until lock".
