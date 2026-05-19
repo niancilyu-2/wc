@@ -15,7 +15,12 @@ const state = {
   teams: [],
   matches: [],
   teamsByGroup: {},
-  picks: { groups: {} }, // { groupCode: { first, second } }
+  teamsByCode: {},
+  picks: {
+    groups: {},  // { groupCode: { first, second } }
+    r32: {},     // { matchId: { a: teamCode, b: teamCode } }
+    bracket: {}, // { matchId: winnerCode } — for r16+ matches
+  },
 };
 
 // FIFA 3-letter code → ISO 3166-1 alpha-2 (used by lipis/flag-icons).
@@ -163,7 +168,7 @@ async function loadReferenceData() {
   const [{ data: groups }, { data: teams }, { data: matches }] = await Promise.all([
     supabase.from('groups').select('*').order('code'),
     supabase.from('teams').select('*').order('code'),
-    supabase.from('matches').select('*').order('kickoff_at'),
+    supabase.from('matches').select('*').order('id'),
   ]);
   state.groups = groups;
   state.teams = teams;
@@ -172,25 +177,87 @@ async function loadReferenceData() {
     (acc[t.group_code] ||= []).push(t);
     return acc;
   }, {});
+  state.teamsByCode = Object.fromEntries(teams.map((t) => [t.code, t]));
 }
 
 async function loadMyPicks() {
-  const { data: groupPicks, error } = await supabase
-    .from('group_picks')
-    .select('*')
-    .eq('player_id', state.player.id);
-  if (error) {
-    console.error('Failed to load group picks', error);
-    return;
-  }
+  const [groupRes, r32Res, brktRes] = await Promise.all([
+    supabase.from('group_picks').select('*').eq('player_id', state.player.id),
+    supabase.from('r32_draft').select('*').eq('player_id', state.player.id),
+    supabase.from('bracket_picks').select('*').eq('player_id', state.player.id),
+  ]);
   state.picks.groups = {};
-  for (const row of groupPicks) {
-    state.picks.groups[row.group_code] = {
-      first: row.first_code,
-      second: row.second_code,
-    };
+  state.picks.r32 = {};
+  state.picks.bracket = {};
+  if (!groupRes.error) {
+    for (const row of groupRes.data) {
+      state.picks.groups[row.group_code] = {
+        first: row.first_code,
+        second: row.second_code,
+      };
+    }
+  }
+  if (!r32Res.error) {
+    for (const row of r32Res.data) {
+      const { matchId, position } = slotToMatch(row.slot_index);
+      (state.picks.r32[matchId] ||= { a: null, b: null })[position] = row.team_code;
+    }
+  }
+  if (!brktRes.error) {
+    for (const row of brktRes.data) {
+      state.picks.bracket[row.match_id] = row.winner_code;
+    }
   }
 }
+
+// ---------- Bracket helpers ----------
+
+// Map between the r32_draft slot_index (1..32) and (matchId, position).
+// Slot 1 = M73.a, 2 = M73.b, 3 = M74.a, 4 = M74.b, ..., 31 = M88.a, 32 = M88.b.
+function slotToMatch(slotIndex) {
+  const matchIndex = Math.floor((slotIndex - 1) / 2); // 0..15
+  const position = (slotIndex - 1) % 2 === 0 ? 'a' : 'b';
+  return { matchId: `M${73 + matchIndex}`, position };
+}
+
+function matchToSlot(matchId, position) {
+  const matchIndex = parseInt(matchId.slice(1), 10) - 73;
+  return matchIndex * 2 + (position === 'a' ? 1 : 2);
+}
+
+// Resolve which team is in a given match's a/b slot.
+// Recurses for R16+ via the WXX / LXX labels in the matches table.
+function teamForSlot(matchId, position) {
+  const match = state.matches.find((m) => m.id === matchId);
+  if (!match) return null;
+  if (match.stage === 'r32') {
+    return state.picks.r32[matchId]?.[position] || null;
+  }
+  const label = position === 'a' ? match.slot_a : match.slot_b;
+  if (label.startsWith('W')) {
+    const priorId = `M${label.slice(1)}`;
+    return state.picks.bracket[priorId] || null;
+  }
+  if (label.startsWith('L')) {
+    const priorId = `M${label.slice(1)}`;
+    const winner = state.picks.bracket[priorId];
+    if (!winner) return null;
+    const a = teamForSlot(priorId, 'a');
+    const b = teamForSlot(priorId, 'b');
+    if (winner === a) return b;
+    if (winner === b) return a;
+    return null;
+  }
+  return null;
+}
+
+const KNOCKOUT_ROUNDS = [
+  { id: 'r32',   label: 'Round of 32' },
+  { id: 'r16',   label: 'Round of 16' },
+  { id: 'qf',    label: 'Quarterfinals' },
+  { id: 'sf',    label: 'Semifinals' },
+  { id: 'final', label: 'Final' },
+];
 
 // ---------- Group picks ----------
 
@@ -287,6 +354,197 @@ function renderGroupPicks() {
   });
 }
 
+// ---------- R32 team picker modal ----------
+
+function showR32TeamPicker(matchId, position) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    const groupRows = state.groups
+      .map((g) => {
+        const teams = state.teamsByGroup[g.code] || [];
+        return `
+          <div class="picker-group">
+            <h4>Group ${g.code}</h4>
+            <ul>
+              ${teams
+                .map((t) => {
+                  const placedAt = locationOfTeam(t.code);
+                  const here = placedAt && placedAt.matchId === matchId && placedAt.position === position;
+                  const elsewhere = placedAt && !here;
+                  return `
+                    <li>
+                      <button type="button" class="picker-team ${here ? 'is-here' : ''} ${elsewhere ? 'is-elsewhere' : ''}"
+                              data-team="${t.code}" ${elsewhere ? 'title="Already placed in M' + placedAt.matchId.slice(1) + '. Clicking moves it here."' : ''}>
+                        ${flagHTML(t.code)}
+                        <span>${t.name}</span>
+                        ${elsewhere ? `<small>in M${placedAt.matchId.slice(1)}</small>` : ''}
+                        ${here ? `<small>(currently here)</small>` : ''}
+                      </button>
+                    </li>`;
+                })
+                .join('')}
+            </ul>
+          </div>`;
+      })
+      .join('');
+
+    root.innerHTML = `
+      <div class="modal-overlay">
+        <div class="modal picker-modal">
+          <h2>Pick a team for ${matchId} (slot ${position.toUpperCase()})</h2>
+          <p>Each team can occupy only one R32 slot. Picking one already placed moves it here.</p>
+          <div class="picker-grid">${groupRows}</div>
+          <div class="picker-actions">
+            <button type="button" class="link-button" id="picker-clear">Clear this slot</button>
+            <button type="button" class="link-button" id="picker-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const cleanup = (result) => {
+      root.innerHTML = '';
+      resolve(result);
+    };
+
+    root.querySelectorAll('.picker-team').forEach((btn) => {
+      btn.addEventListener('click', () => cleanup({ action: 'pick', team: btn.dataset.team }));
+    });
+    document.getElementById('picker-clear').addEventListener('click', () => cleanup({ action: 'clear' }));
+    document.getElementById('picker-cancel').addEventListener('click', () => cleanup({ action: 'cancel' }));
+  });
+}
+
+function locationOfTeam(teamCode) {
+  for (const [matchId, slots] of Object.entries(state.picks.r32)) {
+    if (slots.a === teamCode) return { matchId, position: 'a' };
+    if (slots.b === teamCode) return { matchId, position: 'b' };
+  }
+  return null;
+}
+
+// ---------- R32 slot persistence ----------
+
+async function saveR32Slot(matchId, position, teamCode) {
+  const slotIndex = matchToSlot(matchId, position);
+  if (teamCode === null) {
+    state.picks.r32[matchId] ||= { a: null, b: null };
+    state.picks.r32[matchId][position] = null;
+    const { error } = await supabase
+      .from('r32_draft')
+      .delete()
+      .eq('player_id', state.player.id)
+      .eq('slot_index', slotIndex);
+    if (error) console.error('Delete R32 slot failed', error);
+    return;
+  }
+
+  // If team is currently in another R32 slot, vacate that slot first (state + DB).
+  const existing = locationOfTeam(teamCode);
+  if (existing && !(existing.matchId === matchId && existing.position === position)) {
+    state.picks.r32[existing.matchId][existing.position] = null;
+    await supabase
+      .from('r32_draft')
+      .delete()
+      .eq('player_id', state.player.id)
+      .eq('slot_index', matchToSlot(existing.matchId, existing.position));
+  }
+
+  state.picks.r32[matchId] ||= { a: null, b: null };
+  state.picks.r32[matchId][position] = teamCode;
+  const { error } = await supabase.from('r32_draft').upsert(
+    {
+      player_id: state.player.id,
+      slot_index: slotIndex,
+      team_code: teamCode,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'player_id,slot_index' },
+  );
+  if (error) console.error('Save R32 slot failed', error);
+}
+
+// ---------- Bracket rendering ----------
+
+function teamPillHTML(teamCode, opts = {}) {
+  if (!teamCode) {
+    return `<span class="team-pill team-pill--empty">${opts.placeholder || '— pick team —'}</span>`;
+  }
+  const team = state.teamsByCode[teamCode];
+  if (!team) return `<span class="team-pill">${teamCode}</span>`;
+  return `<span class="team-pill">${flagHTML(team.code)}<span>${team.name}</span></span>`;
+}
+
+function matchCellHTML(matchId) {
+  const match = state.matches.find((m) => m.id === matchId);
+  if (!match) return '';
+  const teamA = teamForSlot(matchId, 'a');
+  const teamB = teamForSlot(matchId, 'b');
+  const isR32 = match.stage === 'r32';
+
+  const slotHTML = (position, team) => {
+    if (isR32) {
+      return `
+        <button type="button" class="bracket-slot ${team ? 'has-team' : 'is-empty'}"
+                data-match="${matchId}" data-position="${position}" data-action="r32-pick">
+          ${teamPillHTML(team)}
+        </button>`;
+    }
+    return `<div class="bracket-slot bracket-slot--readonly">${teamPillHTML(team, { placeholder: '?' })}</div>`;
+  };
+
+  return `
+    <div class="bracket-match" data-match-id="${matchId}">
+      <div class="bracket-match-label">${matchId.slice(1)}</div>
+      ${slotHTML('a', teamA)}
+      ${slotHTML('b', teamB)}
+    </div>`;
+}
+
+function bracketColumnHTML(round) {
+  const matches = state.matches
+    .filter((m) => m.stage === round.id)
+    .sort((a, b) => parseInt(a.id.slice(1), 10) - parseInt(b.id.slice(1), 10));
+  return `
+    <div class="bracket-column bracket-column--${round.id}">
+      <header class="bracket-column-header">${round.label}</header>
+      <div class="bracket-column-body">
+        ${matches.map((m) => matchCellHTML(m.id)).join('')}
+      </div>
+    </div>`;
+}
+
+function renderBracket() {
+  const root = document.getElementById('bracket');
+  const thirdMatch = state.matches.find((m) => m.stage === 'third');
+  root.innerHTML = `
+    <div class="bracket-grid">
+      ${KNOCKOUT_ROUNDS.map(bracketColumnHTML).join('')}
+    </div>
+    <div class="bracket-aside">
+      <h3>3rd Place</h3>
+      ${thirdMatch ? matchCellHTML(thirdMatch.id) : ''}
+    </div>
+  `;
+}
+
+function wireBracketListener() {
+  // Attached once to #bracket; survives any number of innerHTML re-renders.
+  document.getElementById('bracket').addEventListener('click', async (e) => {
+    if (isLocked()) return;
+    const slotBtn = e.target.closest('[data-action="r32-pick"]');
+    if (slotBtn) {
+      const { match, position } = slotBtn.dataset;
+      const result = await showR32TeamPicker(match, position);
+      if (result.action === 'cancel') return;
+      const newTeam = result.action === 'clear' ? null : result.team;
+      await saveR32Slot(match, position, newTeam);
+      renderBracket();
+      renderStatusBar();
+    }
+  });
+}
+
 // ---------- Status & leaderboard placeholders ----------
 
 function renderUserBar() {
@@ -318,6 +576,10 @@ function renderStatusBar() {
   const groupsPicked = Object.values(state.picks.groups).filter(
     (p) => p.first && p.second,
   ).length;
+  const r32Filled = Object.values(state.picks.r32).reduce(
+    (n, slot) => n + (slot.a ? 1 : 0) + (slot.b ? 1 : 0),
+    0,
+  );
   bar.innerHTML = `
     <div class="status-card">
       <div>
@@ -326,6 +588,9 @@ function renderStatusBar() {
       </div>
       <div>
         <strong>Group picks: ${groupsPicked} / 12</strong>
+      </div>
+      <div>
+        <strong>R32 slots: ${r32Filled} / 32</strong>
       </div>
     </div>
   `;
@@ -351,6 +616,8 @@ async function init() {
   await loadMyPicks();
   renderStatusBar();
   renderGroupPicks();
+  renderBracket();
+  wireBracketListener();
   renderLeaderboardPlaceholder();
 }
 
