@@ -1,0 +1,15 @@
+{
+  "name": "wcbracket",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WC 2026 bracket pick'em for ~10 friends",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "serve": "python3 -m http.server 8001"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}
