@@ -26,47 +26,103 @@ function clearStoredPlayer() {
   localStorage.removeItem(STORAGE_KEY_PLAYER);
 }
 
-// ---------- Signup ----------
+// ---------- Player picker (signup + switch) ----------
 
-function showSignupModal() {
+async function loadPlayers() {
+  const { data, error } = await supabase
+    .from('players')
+    .select('id, name')
+    .order('name');
+  if (error) {
+    console.error('Failed to load players', error);
+    return [];
+  }
+  return data;
+}
+
+function showPlayerPicker() {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
-    root.innerHTML = `
-      <div class="modal-overlay">
-        <div class="modal">
-          <h2>Welcome to WC 2026 Bracket</h2>
-          <p>Pick a display name. Once you've made picks, you'll come back as the same player on this device.</p>
-          <form id="signup-form">
-            <input id="signup-name" type="text" maxlength="30" placeholder="Your name" required autofocus />
-            <button type="submit">Enter</button>
-            <p id="signup-error" class="error" hidden></p>
-          </form>
+
+    const renderPickerList = (players) => {
+      root.innerHTML = `
+        <div class="modal-overlay">
+          <div class="modal">
+            <h2>Who are you?</h2>
+            ${
+              players.length
+                ? `<p>Pick yourself from the list, or add a new player.</p>
+                   <ul class="player-list">
+                     ${players
+                       .map(
+                         (p) => `
+                       <li><button type="button" class="player-pick" data-id="${p.id}" data-name="${p.name}">${p.name}</button></li>`,
+                       )
+                       .join('')}
+                   </ul>
+                   <hr class="modal-divider" />`
+                : `<p>No players yet. Add yourself to get started.</p>`
+            }
+            <button type="button" class="link-button" id="add-new-player">+ New player</button>
+          </div>
         </div>
-      </div>
-    `;
-    const form = document.getElementById('signup-form');
-    const errorEl = document.getElementById('signup-error');
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      errorEl.hidden = true;
-      const name = document.getElementById('signup-name').value.trim();
-      if (!name) return;
-      const { data, error } = await supabase
-        .from('players')
-        .insert({ name })
-        .select()
-        .single();
-      if (error) {
-        errorEl.textContent = error.code === '23505'
-          ? `"${name}" is already taken. Try another name.`
-          : `Couldn't sign you up: ${error.message}`;
-        errorEl.hidden = false;
-        return;
-      }
-      setStoredPlayer({ id: data.id, name: data.name });
-      root.innerHTML = '';
-      resolve(data);
-    });
+      `;
+      root.querySelectorAll('.player-pick').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const player = { id: btn.dataset.id, name: btn.dataset.name };
+          setStoredPlayer(player);
+          root.innerHTML = '';
+          resolve(player);
+        });
+      });
+      document.getElementById('add-new-player').addEventListener('click', renderNewForm);
+    };
+
+    const renderNewForm = () => {
+      root.innerHTML = `
+        <div class="modal-overlay">
+          <div class="modal">
+            <h2>New player</h2>
+            <p>Pick a display name. Names are unique across the site.</p>
+            <form id="signup-form">
+              <input id="signup-name" type="text" maxlength="30" placeholder="Your name" required autofocus />
+              <button type="submit">Enter</button>
+              <p id="signup-error" class="error" hidden></p>
+            </form>
+            <button type="button" class="link-button" id="back-to-list">← back to list</button>
+          </div>
+        </div>
+      `;
+      const form = document.getElementById('signup-form');
+      const errorEl = document.getElementById('signup-error');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorEl.hidden = true;
+        const name = document.getElementById('signup-name').value.trim();
+        if (!name) return;
+        const { data, error } = await supabase
+          .from('players')
+          .insert({ name })
+          .select()
+          .single();
+        if (error) {
+          errorEl.textContent =
+            error.code === '23505'
+              ? `"${name}" is already taken. Try another name.`
+              : `Couldn't add you: ${error.message}`;
+          errorEl.hidden = false;
+          return;
+        }
+        setStoredPlayer({ id: data.id, name: data.name });
+        root.innerHTML = '';
+        resolve(data);
+      });
+      document.getElementById('back-to-list').addEventListener('click', async () => {
+        renderPickerList(await loadPlayers());
+      });
+    };
+
+    loadPlayers().then(renderPickerList);
   });
 }
 
@@ -112,7 +168,7 @@ function renderStatus({ groups, teams, matches }) {
 async function init() {
   let player = getStoredPlayer();
   if (!player) {
-    player = await showSignupModal();
+    player = await showPlayerPicker();
   }
   renderUserBar(player);
   const data = await loadReferenceData();

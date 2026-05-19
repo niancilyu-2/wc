@@ -150,3 +150,48 @@ main {
   font-size: 0.875rem;
   margin-top: 0.75rem;
 }
+
+.player-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.player-list li {
+  margin: 0;
+}
+
+.player-pick {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.player-pick:hover {
+  background: var(--border);
+  border-color: var(--accent);
+}
+
+.modal-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0;
+}
+
+.modal .link-button {
+  display: inline-block;
+  padding: 0.5rem 0;
+  background: transparent;
+  color: var(--text-muted);
+}
