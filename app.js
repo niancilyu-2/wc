@@ -18,6 +18,28 @@ const state = {
   picks: { groups: {} }, // { groupCode: { first, second } }
 };
 
+// FIFA 3-letter code → ISO 3166-1 alpha-2 (used by lipis/flag-icons).
+// gb-eng/gb-sct are valid library subregion codes.
+const FIFA_TO_ISO = {
+  MEX: 'mx', RSA: 'za', KOR: 'kr', CZE: 'cz',
+  CAN: 'ca', BIH: 'ba', QAT: 'qa', SUI: 'ch',
+  BRA: 'br', MAR: 'ma', HAI: 'ht', SCO: 'gb-sct',
+  USA: 'us', PAR: 'py', AUS: 'au', TUR: 'tr',
+  GER: 'de', CUW: 'cw', CIV: 'ci', ECU: 'ec',
+  NED: 'nl', JPN: 'jp', SWE: 'se', TUN: 'tn',
+  BEL: 'be', EGY: 'eg', IRN: 'ir', NZL: 'nz',
+  ESP: 'es', CPV: 'cv', KSA: 'sa', URU: 'uy',
+  FRA: 'fr', SEN: 'sn', IRQ: 'iq', NOR: 'no',
+  ARG: 'ar', ALG: 'dz', AUT: 'at', JOR: 'jo',
+  POR: 'pt', COD: 'cd', UZB: 'uz', COL: 'co',
+  ENG: 'gb-eng', CRO: 'hr', GHA: 'gh', PAN: 'pa',
+};
+
+function flagHTML(teamCode) {
+  const iso = FIFA_TO_ISO[teamCode];
+  return iso ? `<span class="fi fi-${iso}"></span>` : '';
+}
+
 function isLocked() {
   return new Date() >= new Date(LOCK_DATE_ISO);
 }
@@ -187,6 +209,7 @@ async function saveGroupPick(groupCode, slot, teamCode) {
 
   state.picks.groups[groupCode] = current;
   renderGroupCard(groupCode);
+  renderStatusBar();
 
   const isEmpty = current.first === null && current.second === null;
   if (isEmpty) {
@@ -220,8 +243,8 @@ function groupCardHTML(groupCode) {
       const isSecond = pick.second === t.code;
       return `
         <li class="team-row">
-          <span class="team-flag">${t.flag_emoji}</span>
-          <span class="team-name">${t.name}</span>
+          ${flagHTML(t.code)}
+          <span class="team-name" title="${t.name}">${t.name}</span>
           <button type="button" class="rank-btn ${isFirst ? 'is-active' : ''}"
                   data-group="${groupCode}" data-slot="first" data-team="${t.code}">1st</button>
           <button type="button" class="rank-btn ${isSecond ? 'is-active' : ''}"
@@ -248,22 +271,19 @@ function groupCardHTML(groupCode) {
 function renderGroupCard(groupCode) {
   const existing = document.querySelector(`[data-group-card="${groupCode}"]`);
   if (!existing) return;
-  existing.outerHTML = groupCardHTML(groupCode);
-  wireRankButtons();
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = groupCardHTML(groupCode);
+  existing.replaceWith(wrapper.firstElementChild);
 }
 
 function renderGroupPicks() {
   const grid = document.getElementById('groups-grid');
   grid.innerHTML = state.groups.map((g) => groupCardHTML(g.code)).join('');
-  wireRankButtons();
-}
-
-function wireRankButtons() {
-  document.querySelectorAll('.rank-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (isLocked()) return;
-      saveGroupPick(btn.dataset.group, btn.dataset.slot, btn.dataset.team);
-    });
+  // Single delegated listener — survives card re-renders without leaking.
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rank-btn');
+    if (!btn || isLocked()) return;
+    saveGroupPick(btn.dataset.group, btn.dataset.slot, btn.dataset.team);
   });
 }
 

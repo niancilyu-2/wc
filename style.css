@@ -267,29 +267,35 @@ main {
 
 .team-row {
   display: grid;
-  grid-template-columns: 28px 1fr auto auto;
+  grid-template-columns: 28px minmax(0, 1fr) 40px 40px;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
+  min-height: 44px;
 }
 
 .team-row:last-child {
   border-bottom: none;
 }
 
-.team-flag {
-  font-size: 1.25rem;
-  line-height: 1;
+.team-row .fi {
+  width: 24px;
+  height: 18px;
+  border-radius: 2px;
 }
 
 .team-name {
   font-size: 0.875rem;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .rank-btn {
-  padding: 0.25rem 0.5rem;
+  padding: 0.25rem 0;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -299,7 +305,8 @@ main {
   font-weight: 700;
   letter-spacing: 0.05em;
   cursor: pointer;
-  min-width: 36px;
+  width: 100%;
+  text-align: center;
 }
 
 .rank-btn:hover:not(.is-active) {
