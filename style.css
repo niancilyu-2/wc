@@ -397,6 +397,14 @@ main {
   min-height: 44px;
 }
 
+.team-row--rank3 {
+  grid-template-columns: 28px minmax(0, 1fr) 36px 36px 36px;
+}
+
+.team-row.is-fourth {
+  opacity: 0.55;
+}
+
 .team-row:last-child {
   border-bottom: none;
 }
@@ -442,9 +450,15 @@ main {
   color: white;
 }
 
-.rank-btn[data-slot="second"].is-active {
+.rank-btn--second.is-active {
   background: var(--accent-2);
   border-color: var(--accent-2);
+}
+
+.rank-btn--third.is-active {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #1a1500;
 }
 
 .group-card-footer {
@@ -595,6 +609,104 @@ main {
 
 .picks-controls-note {
   color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ---- Wildcards picker ---- */
+
+.wildcards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.wildcards-empty {
+  grid-column: 1 / -1;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.wildcard-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wildcard-card:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.wildcard-card.is-active {
+  background: rgba(0, 184, 107, 0.18);
+  border-color: var(--accent-2);
+}
+
+.wildcard-card:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.wildcard-card-group {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.wildcard-card-team {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+  min-width: 0;
+}
+
+.wildcard-card-team .fi {
+  width: 20px;
+  height: 15px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.wildcard-card-team > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wildcard-card-state {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.wildcard-card.is-active .wildcard-card-state {
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.wildcards-status {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.wildcards-ready {
+  color: var(--accent-2);
+  font-weight: 700;
   font-size: 0.85rem;
 }
 

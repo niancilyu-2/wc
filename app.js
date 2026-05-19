@@ -1,6 +1,8 @@
 // ABOUTME: Core application logic for WC 2026 bracket pick'em.
 // ABOUTME: Handles self-signup, picks, lock logic, leaderboard, and bracket rendering.
 
+import { lookupAssignment } from './src/wildcards.js';
+
 // Single-phase model: everything (groups + R32 draft + bracket + tiebreaker)
 // is editable until the first WC kickoff on June 11.
 const LOCK_DATE_ISO = '2026-06-11T13:00:00-06:00'; // Mexico vs South Africa
@@ -15,8 +17,10 @@ const supabase = window.supabase.createClient(
 //   draft = working copy edited by clicks/auto-pick; never written to DB until Save/Submit.
 //   saved = last snapshot persisted to DB.
 // isDirty() compares the two; nav guards and Save button rely on the diff.
+// Each group pick has { first, second, third, advances } where `advances` flags
+// the group's 3rd team as one of the eight R32 wildcards.
 function blankPicks() {
-  return { groups: {}, r32: {}, bracket: {}, tiebreaker: null };
+  return { groups: {}, bracket: {}, tiebreaker: null };
 }
 
 const state = {
@@ -220,22 +224,20 @@ async function loadCurrentPlayer() {
 }
 
 async function loadMyPicks() {
-  const [groupRes, r32Res, brktRes, tbRes] = await Promise.all([
+  const [groupRes, brktRes, tbRes] = await Promise.all([
     supabase.from('group_picks').select('*').eq('player_id', state.player.id),
-    supabase.from('r32_draft').select('*').eq('player_id', state.player.id),
     supabase.from('bracket_picks').select('*').eq('player_id', state.player.id),
     supabase.from('tiebreaker_picks').select('*').eq('player_id', state.player.id).maybeSingle(),
   ]);
   const saved = blankPicks();
   if (!groupRes.error) {
     for (const row of groupRes.data) {
-      saved.groups[row.group_code] = { first: row.first_code, second: row.second_code };
-    }
-  }
-  if (!r32Res.error) {
-    for (const row of r32Res.data) {
-      const { matchId, position } = slotToMatch(row.slot_index);
-      (saved.r32[matchId] ||= { a: null, b: null })[position] = row.team_code;
+      saved.groups[row.group_code] = {
+        first: row.first_code,
+        second: row.second_code,
+        third: row.third_code,
+        advances: !!row.third_advances,
+      };
     }
   }
   if (!brktRes.error) {
@@ -252,16 +254,57 @@ async function loadMyPicks() {
 
 // ---------- Bracket helpers ----------
 
-// Map between the r32_draft slot_index (1..32) and (matchId, position).
-function slotToMatch(slotIndex) {
-  const matchIndex = Math.floor((slotIndex - 1) / 2); // 0..15
-  const position = (slotIndex - 1) % 2 === 0 ? 'a' : 'b';
-  return { matchId: `M${73 + matchIndex}`, position };
+// FIFA's R32 pairing rules: 1A means "winner of group A", 2A means "runner-up
+// of group A", '3wc' means "wildcard 3rd-place team for this slot" (resolved
+// via the lookup table once the user has picked their 8 advancing thirds).
+// Source: Wikipedia 2026 FIFA World Cup knockout stage.
+const R32_SLOT_RULES = {
+  M73: { a: '2A', b: '2B' },
+  M74: { a: '1E', b: '3wc' },
+  M75: { a: '1F', b: '2C' },
+  M76: { a: '1C', b: '2F' },
+  M77: { a: '1I', b: '3wc' },
+  M78: { a: '2E', b: '2I' },
+  M79: { a: '1A', b: '3wc' },
+  M80: { a: '1L', b: '3wc' },
+  M81: { a: '1D', b: '3wc' },
+  M82: { a: '1G', b: '3wc' },
+  M83: { a: '2K', b: '2L' },
+  M84: { a: '1H', b: '2J' },
+  M85: { a: '1B', b: '3wc' },
+  M86: { a: '1J', b: '2H' },
+  M87: { a: '1K', b: '3wc' },
+  M88: { a: '2D', b: '2G' },
+};
+
+function advancingGroups() {
+  return state.groups
+    .map((g) => g.code)
+    .filter((code) => state.picks.draft.groups[code]?.advances);
 }
 
-function matchToSlot(matchId, position) {
-  const matchIndex = parseInt(matchId.slice(1), 10) - 73;
-  return matchIndex * 2 + (position === 'a' ? 1 : 2);
+function currentWildcardAssignment() {
+  const groups = advancingGroups();
+  if (groups.length !== 8) return null;
+  return lookupAssignment(groups);
+}
+
+function resolveR32Slot(matchId, position) {
+  const rule = R32_SLOT_RULES[matchId];
+  if (!rule) return null;
+  const slot = position === 'a' ? rule.a : rule.b;
+  if (slot === '3wc') {
+    const wc = currentWildcardAssignment();
+    if (!wc) return null;
+    const sourceGroup = wc[matchId];
+    return state.picks.draft.groups[sourceGroup]?.third || null;
+  }
+  // slot is like '1A' or '2B'
+  const rank = slot[0];
+  const group = slot[1];
+  const pick = state.picks.draft.groups[group];
+  if (!pick) return null;
+  return rank === '1' ? pick.first : pick.second;
 }
 
 // Resolve which team is in a given match's a/b slot, reading from the draft.
@@ -272,7 +315,7 @@ function teamForSlot(matchId, position) {
     return position === 'a' ? match.team_a_code : match.team_b_code;
   }
   if (match.stage === 'r32') {
-    return state.picks.draft.r32[matchId]?.[position] || null;
+    return resolveR32Slot(matchId, position);
   }
   const label = position === 'a' ? match.slot_a : match.slot_b;
   if (!label) return null;
@@ -302,51 +345,85 @@ const KNOCKOUT_ROUNDS = [
 
 // ---------- Group picks ----------
 
-function toggleGroupPick(groupCode, slot, teamCode) {
-  const current = state.picks.draft.groups[groupCode] || { first: null, second: null };
-  const other = slot === 'first' ? 'second' : 'first';
+const RANK_SLOTS = ['first', 'second', 'third'];
 
+function emptyGroupPick() {
+  return { first: null, second: null, third: null, advances: false };
+}
+
+function toggleGroupPick(groupCode, slot, teamCode) {
+  const current = state.picks.draft.groups[groupCode] || emptyGroupPick();
   // Toggling off the same team in the same slot clears it.
   if (current[slot] === teamCode) {
     current[slot] = null;
   } else {
-    // Clicking a team that's currently in the other slot moves it (no duplicates).
-    if (current[other] === teamCode) current[other] = null;
+    // Picking the team for this slot vacates whichever other slot held it
+    // (a team can only occupy one rank per group).
+    for (const other of RANK_SLOTS) {
+      if (other !== slot && current[other] === teamCode) current[other] = null;
+    }
     current[slot] = teamCode;
   }
   state.picks.draft.groups[groupCode] = current;
+  // Changing the 3rd-place team or clearing it can invalidate wildcard selection;
+  // if the group is no longer fully ranked, drop its `advances` flag.
+  if (!current.third) current.advances = false;
   renderGroupCard(groupCode);
   renderGroupsActions();
+  renderWildcardsSection();
+  renderBracket();
+  renderStatusBar();
+  renderGlobalActions();
+}
+
+function toggleWildcardAdvance(groupCode) {
+  const current = state.picks.draft.groups[groupCode];
+  if (!current?.third) return; // can't advance without a 3rd picked
+  const wildcardCount = advancingGroups().length;
+  if (current.advances) {
+    current.advances = false;
+  } else {
+    if (wildcardCount >= 8) return; // already at 8
+    current.advances = true;
+  }
+  state.picks.draft.groups[groupCode] = current;
+  renderWildcardsSection();
+  renderBracket();
   renderStatusBar();
   renderGlobalActions();
 }
 
 function groupCardHTML(groupCode) {
   const teams = state.teamsByGroup[groupCode] || [];
-  const pick = state.picks.draft.groups[groupCode] || { first: null, second: null };
+  const pick = state.picks.draft.groups[groupCode] || emptyGroupPick();
   const disabled = isEditingDisabled();
   const rows = teams
     .map((t) => {
-      const isFirst = pick.first === t.code;
-      const isSecond = pick.second === t.code;
+      const ranks = {
+        first: pick.first === t.code,
+        second: pick.second === t.code,
+        third: pick.third === t.code,
+      };
+      const isFourth = !ranks.first && !ranks.second && !ranks.third && (pick.first && pick.second && pick.third);
+      const btn = (slot, label) => `
+        <button type="button" class="rank-btn rank-btn--${slot} ${ranks[slot] ? 'is-active' : ''}"
+                data-group="${groupCode}" data-slot="${slot}" data-team="${t.code}" ${disabled ? 'disabled' : ''}>${label}</button>`;
       return `
-        <li class="team-row">
+        <li class="team-row team-row--rank3 ${isFourth ? 'is-fourth' : ''}">
           ${flagHTML(t.code)}
           <span class="team-name" title="${t.name}">${t.name}</span>
-          <button type="button" class="rank-btn ${isFirst ? 'is-active' : ''}"
-                  data-group="${groupCode}" data-slot="first" data-team="${t.code}" ${disabled ? 'disabled' : ''}>1st</button>
-          <button type="button" class="rank-btn ${isSecond ? 'is-active' : ''}"
-                  data-group="${groupCode}" data-slot="second" data-team="${t.code}" ${disabled ? 'disabled' : ''}>2nd</button>
+          ${btn('first', '1st')}
+          ${btn('second', '2nd')}
+          ${btn('third', '3rd')}
         </li>`;
     })
     .join('');
 
-  const statusText =
-    pick.first && pick.second
-      ? `<span class="pick-status saved">Complete</span>`
-      : pick.first || pick.second
-      ? `<span class="pick-status partial">Pick the other slot</span>`
-      : `<span class="pick-status empty">No picks yet</span>`;
+  const rankCount = (pick.first ? 1 : 0) + (pick.second ? 1 : 0) + (pick.third ? 1 : 0);
+  let statusText;
+  if (rankCount === 3) statusText = `<span class="pick-status saved">Complete</span>`;
+  else if (rankCount > 0) statusText = `<span class="pick-status partial">${rankCount} / 3 ranked</span>`;
+  else statusText = `<span class="pick-status empty">No picks yet</span>`;
 
   return `
     <div class="group-card" data-group-card="${groupCode}">
@@ -391,24 +468,28 @@ function autoFillEmptyGroups() {
   let changed = 0;
   for (const group of state.groups) {
     const existing = state.picks.draft.groups[group.code];
-    if (existing && (existing.first || existing.second)) continue;
+    if (existing && (existing.first || existing.second || existing.third)) continue;
     const shuffledTeams = shuffled(state.teamsByGroup[group.code] || []);
-    if (shuffledTeams.length < 2) continue;
+    if (shuffledTeams.length < 3) continue;
     state.picks.draft.groups[group.code] = {
       first: shuffledTeams[0].code,
       second: shuffledTeams[1].code,
+      third: shuffledTeams[2].code,
+      advances: false,
     };
     changed++;
   }
   if (!changed) return;
   renderGroupPicks();
   renderGroupsActions();
+  renderWildcardsSection();
+  renderBracket();
   renderStatusBar();
   renderGlobalActions();
 }
 
 function groupsCompletePicks() {
-  return Object.values(state.picks.draft.groups).filter((p) => p.first && p.second).length;
+  return Object.values(state.picks.draft.groups).filter((p) => p.first && p.second && p.third).length;
 }
 
 function renderGroupsActions() {
@@ -427,89 +508,65 @@ function wireGroupsActions() {
   });
 }
 
-// ---------- R32 free-draft (team picker) ----------
+// ---------- Wildcards picker (8 of 12 thirds advance to R32) ----------
 
-function locationOfTeamInDraft(teamCode) {
-  for (const [matchId, slots] of Object.entries(state.picks.draft.r32)) {
-    if (slots.a === teamCode) return { matchId, position: 'a' };
-    if (slots.b === teamCode) return { matchId, position: 'b' };
+function renderWildcardsSection() {
+  const root = document.getElementById('wildcards-grid');
+  if (!root) return;
+  const disabled = isEditingDisabled();
+  const count = advancingGroups().length;
+  const groupsReady = state.groups.every((g) => {
+    const p = state.picks.draft.groups[g.code];
+    return p && p.first && p.second && p.third;
+  });
+
+  if (!groupsReady) {
+    root.innerHTML = `
+      <p class="wildcards-empty">Rank all 12 groups (1st, 2nd, 3rd) before picking wildcards.</p>
+    `;
+    document.getElementById('wildcards-status').textContent = '';
+    return;
   }
-  return null;
+
+  const cards = state.groups
+    .map((g) => {
+      const p = state.picks.draft.groups[g.code] || emptyGroupPick();
+      const team = state.teamsByCode[p.third];
+      const active = !!p.advances;
+      const atMax = count >= 8 && !active;
+      const teamName = team ? team.name : '—';
+      return `
+        <button type="button" class="wildcard-card ${active ? 'is-active' : ''}"
+                data-group="${g.code}"
+                ${disabled || atMax ? 'disabled' : ''}
+                ${atMax ? 'title="Already 8 picked — deselect another first"' : ''}>
+          <header class="wildcard-card-group">Group ${g.code} · 3rd</header>
+          <div class="wildcard-card-team">
+            ${team ? flagHTML(team.code) : ''}
+            <span>${teamName}</span>
+          </div>
+          <span class="wildcard-card-state">${active ? '✓ Advances' : 'Tap to advance'}</span>
+        </button>`;
+    })
+    .join('');
+
+  root.innerHTML = cards;
+  document.getElementById('wildcards-status').innerHTML = `
+    <strong>${count} / 8 picked</strong>
+    ${count === 8 ? '<span class="wildcards-ready">✓ Bracket ready</span>' : ''}
+  `;
 }
 
-function showR32TeamPicker(matchId, position) {
-  return new Promise((resolve) => {
-    const root = document.getElementById('modal-root');
-    const groupRows = state.groups
-      .map((g) => {
-        const teams = state.teamsByGroup[g.code] || [];
-        return `
-          <div class="picker-group">
-            <h4>Group ${g.code}</h4>
-            <ul>
-              ${teams
-                .map((t) => {
-                  const placedAt = locationOfTeamInDraft(t.code);
-                  const here = placedAt && placedAt.matchId === matchId && placedAt.position === position;
-                  const elsewhere = placedAt && !here;
-                  return `
-                    <li>
-                      <button type="button" class="picker-team ${here ? 'is-here' : ''} ${elsewhere ? 'is-elsewhere' : ''}"
-                              data-team="${t.code}"
-                              ${elsewhere ? 'title="Already placed in M' + placedAt.matchId.slice(1) + '. Clicking moves it here."' : ''}>
-                        ${flagHTML(t.code)}
-                        <span>${t.name}</span>
-                        ${elsewhere ? `<small>in M${placedAt.matchId.slice(1)}</small>` : ''}
-                        ${here ? `<small>(currently here)</small>` : ''}
-                      </button>
-                    </li>`;
-                })
-                .join('')}
-            </ul>
-          </div>`;
-      })
-      .join('');
-
-    root.innerHTML = `
-      <div class="modal-overlay">
-        <div class="modal picker-modal">
-          <h2>Pick a team for ${matchId} (slot ${position.toUpperCase()})</h2>
-          <p>Each team can occupy only one R32 slot. Picking one already placed moves it here.</p>
-          <div class="picker-grid">${groupRows}</div>
-          <div class="picker-actions">
-            <button type="button" class="btn-link" id="picker-clear">Clear this slot</button>
-            <button type="button" class="btn-link" id="picker-cancel">Cancel</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    const cleanup = (result) => {
-      root.innerHTML = '';
-      resolve(result);
-    };
-    root.querySelectorAll('.picker-team').forEach((btn) => {
-      btn.addEventListener('click', () => cleanup({ action: 'pick', team: btn.dataset.team }));
-    });
-    document.getElementById('picker-clear').addEventListener('click', () => cleanup({ action: 'clear' }));
-    document.getElementById('picker-cancel').addEventListener('click', () => cleanup({ action: 'cancel' }));
+function wireWildcards() {
+  document.getElementById('wildcards-grid').addEventListener('click', (e) => {
+    if (isEditingDisabled()) return;
+    const btn = e.target.closest('.wildcard-card');
+    if (!btn || btn.disabled) return;
+    toggleWildcardAdvance(btn.dataset.group);
   });
 }
 
-function setR32Slot(matchId, position, teamCode) {
-  if (teamCode === null) {
-    state.picks.draft.r32[matchId] ||= { a: null, b: null };
-    state.picks.draft.r32[matchId][position] = null;
-    return;
-  }
-  // If team is currently in another R32 slot, vacate that slot.
-  const existing = locationOfTeamInDraft(teamCode);
-  if (existing && !(existing.matchId === matchId && existing.position === position)) {
-    state.picks.draft.r32[existing.matchId][existing.position] = null;
-  }
-  state.picks.draft.r32[matchId] ||= { a: null, b: null };
-  state.picks.draft.r32[matchId][position] = teamCode;
-}
+// ---------- Bracket winner pick ----------
 
 function setBracketWinner(matchId, teamCode) {
   // Toggle off if already the winner; otherwise set.
@@ -535,6 +592,10 @@ function diffMap(saved, draft, keyFn) {
   return { upserts, deletes };
 }
 
+function groupPickEqual(a, b) {
+  return a.first === b.first && a.second === b.second && a.third === b.third && !!a.advances === !!b.advances;
+}
+
 async function persistGroupPicks() {
   const saved = state.picks.saved.groups;
   const draft = state.picks.draft.groups;
@@ -543,17 +604,19 @@ async function persistGroupPicks() {
   for (const code of Object.keys(draft)) {
     const d = draft[code];
     const s = saved[code];
-    const empty = !d.first && !d.second;
+    const empty = !d.first && !d.second && !d.third && !d.advances;
     if (empty) {
       if (s) deletes.push(code);
       continue;
     }
-    if (!s || s.first !== d.first || s.second !== d.second) {
+    if (!s || !groupPickEqual(s, d)) {
       upserts.push({
         player_id: state.player.id,
         group_code: code,
         first_code: d.first,
         second_code: d.second,
+        third_code: d.third,
+        third_advances: !!d.advances,
         updated_at: new Date().toISOString(),
       });
     }
@@ -573,54 +636,6 @@ async function persistGroupPicks() {
       .delete()
       .eq('player_id', state.player.id)
       .in('group_code', deletes);
-    if (error) throw error;
-  }
-}
-
-async function persistR32Picks() {
-  const saved = state.picks.saved.r32;
-  const draft = state.picks.draft.r32;
-  const upserts = [];
-  const deleteSlotIndexes = [];
-  const seen = new Set();
-  for (const matchId of Object.keys(draft)) {
-    for (const pos of ['a', 'b']) {
-      const teamCode = draft[matchId]?.[pos] || null;
-      const savedTeam = saved[matchId]?.[pos] || null;
-      const slotIndex = matchToSlot(matchId, pos);
-      seen.add(slotIndex);
-      if (teamCode === savedTeam) continue;
-      if (teamCode === null) {
-        deleteSlotIndexes.push(slotIndex);
-      } else {
-        upserts.push({
-          player_id: state.player.id,
-          slot_index: slotIndex,
-          team_code: teamCode,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    }
-  }
-  for (const matchId of Object.keys(saved)) {
-    for (const pos of ['a', 'b']) {
-      const slotIndex = matchToSlot(matchId, pos);
-      if (seen.has(slotIndex)) continue;
-      if (saved[matchId]?.[pos]) deleteSlotIndexes.push(slotIndex);
-    }
-  }
-  if (upserts.length) {
-    const { error } = await supabase
-      .from('r32_draft')
-      .upsert(upserts, { onConflict: 'player_id,slot_index' });
-    if (error) throw error;
-  }
-  if (deleteSlotIndexes.length) {
-    const { error } = await supabase
-      .from('r32_draft')
-      .delete()
-      .eq('player_id', state.player.id)
-      .in('slot_index', deleteSlotIndexes);
     if (error) throw error;
   }
 }
@@ -684,7 +699,6 @@ async function persistTiebreaker() {
 
 async function saveDraft() {
   await persistGroupPicks();
-  await persistR32Picks();
   await persistBracketPicks();
   await persistTiebreaker();
   state.picks.saved = snapshot(state.picks.draft);
@@ -780,6 +794,7 @@ function renderAll() {
   renderStatusBar();
   renderGroupPicks();
   renderGroupsActions();
+  renderWildcardsSection();
   renderBracket();
   renderTiebreaker();
   renderGlobalActions();
@@ -910,34 +925,13 @@ function matchCellHTML(matchId) {
   if (!match) return '';
   const teamA = teamForSlot(matchId, 'a');
   const teamB = teamForSlot(matchId, 'b');
-  const isR32 = match.stage === 'r32';
   const disabled = isEditingDisabled();
   const canAdvance = !!(teamA && teamB);
   const winner = effectiveWinner(matchId, teamA, teamB);
 
   const slotHTML = (position, team) => {
     const isWinner = team && winner === team;
-    const pill = teamPillHTML(team, { placeholder: isR32 ? '— pick team —' : '?' });
-
-    if (isR32 && !team) {
-      return `
-        <button type="button" class="bracket-slot is-empty"
-                data-match="${matchId}" data-position="${position}" data-action="r32-pick" ${disabled ? 'disabled' : ''}>
-          ${pill}
-        </button>`;
-    }
-
-    if (isR32) {
-      const teamEl = canAdvance && !disabled
-        ? `<button type="button" class="slot-team" data-match="${matchId}" data-team="${team}" data-action="advance">${pill}</button>`
-        : `<div class="slot-team slot-team--readonly">${pill}</div>`;
-      return `
-        <div class="bracket-slot bracket-slot--filled ${isWinner ? 'is-winner' : ''}">
-          ${teamEl}
-          <button type="button" class="slot-edit" data-match="${matchId}" data-position="${position}" data-action="r32-edit" title="Change team" ${disabled ? 'disabled' : ''}>✎</button>
-        </div>`;
-    }
-
+    const pill = teamPillHTML(team, { placeholder: '?' });
     if (!team || !canAdvance || disabled) {
       return `<div class="bracket-slot bracket-slot--readonly ${isWinner ? 'is-winner' : ''}">${pill}</div>`;
     }
@@ -971,6 +965,24 @@ function bracketColumnHTML(round) {
 
 function renderBracket() {
   const root = document.getElementById('bracket');
+  const groupsReady = state.groups.every((g) => {
+    const p = state.picks.draft.groups[g.code];
+    return p && p.first && p.second && p.third;
+  });
+  const wildcardsReady = advancingGroups().length === 8;
+
+  if (!groupsReady || !wildcardsReady) {
+    const missing = [];
+    if (!groupsReady) missing.push('rank all 12 groups (1st, 2nd, 3rd)');
+    if (!wildcardsReady) missing.push('pick 8 wildcard 3rd-place teams to advance');
+    root.innerHTML = `
+      <div class="bracket-locked-notice">
+        <strong>The bracket auto-fills once your picks are complete.</strong>
+        <p>To populate R32, you still need to ${missing.join(' and ')}.</p>
+      </div>`;
+    return;
+  }
+
   const thirdMatch = state.matches.find((m) => m.stage === 'third');
   root.innerHTML = `
     <div class="bracket-grid">
@@ -985,28 +997,14 @@ function renderBracket() {
 
 function wireBracketListener() {
   // Attached once to #bracket; survives any number of innerHTML re-renders.
-  document.getElementById('bracket').addEventListener('click', async (e) => {
+  document.getElementById('bracket').addEventListener('click', (e) => {
     if (isEditingDisabled()) return;
-
     const advance = e.target.closest('[data-action="advance"]');
-    if (advance) {
-      setBracketWinner(advance.dataset.match, advance.dataset.team);
-      renderBracket();
-      renderStatusBar();
-      renderGlobalActions();
-      return;
-    }
-
-    const pickBtn = e.target.closest('[data-action="r32-pick"], [data-action="r32-edit"]');
-    if (pickBtn) {
-      const { match, position } = pickBtn.dataset;
-      const result = await showR32TeamPicker(match, position);
-      if (result.action === 'cancel') return;
-      setR32Slot(match, position, result.action === 'clear' ? null : result.team);
-      renderBracket();
-      renderStatusBar();
-      renderGlobalActions();
-    }
+    if (!advance) return;
+    setBracketWinner(advance.dataset.match, advance.dataset.team);
+    renderBracket();
+    renderStatusBar();
+    renderGlobalActions();
   });
 }
 
@@ -1041,12 +1039,9 @@ function renderStatusBar() {
   const now = new Date();
 
   const groupsPicked = Object.values(state.picks.draft.groups).filter(
-    (p) => p.first && p.second,
+    (p) => p.first && p.second && p.third,
   ).length;
-  const r32Filled = Object.values(state.picks.draft.r32).reduce(
-    (n, slot) => n + (slot.a ? 1 : 0) + (slot.b ? 1 : 0),
-    0,
-  );
+  const wildcardCount = advancingGroups().length;
   const winnersPicked = state.matches
     .filter((m) => m.stage !== 'group')
     .filter((m) => effectiveWinner(m.id, teamForSlot(m.id, 'a'), teamForSlot(m.id, 'b'))).length;
@@ -1057,8 +1052,8 @@ function renderStatusBar() {
         <strong>${locked ? 'Picks locked' : `Picks lock in ${formatCountdown(lockMoment - now)}`}</strong>
         <div class="status-sub">${lockMoment.toLocaleString()}</div>
       </div>
-      <div><strong>Groups: ${groupsPicked} / 12</strong></div>
-      <div><strong>R32 slots: ${r32Filled} / 32</strong></div>
+      <div><strong>Groups ranked: ${groupsPicked} / 12</strong></div>
+      <div><strong>Wildcard 3rds: ${wildcardCount} / 8</strong></div>
       <div><strong>Winner picks: ${winnersPicked} / 32</strong></div>
     </div>
   `;
@@ -1085,6 +1080,7 @@ async function init() {
   await loadMyPicks();
   renderAll();
   wireGroupsActions();
+  wireWildcards();
   wireBracketListener();
   wireGlobalActions();
   wireInternalLinkGuards();

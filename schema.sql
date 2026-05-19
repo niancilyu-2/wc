@@ -67,16 +67,19 @@ CREATE TABLE IF NOT EXISTS players (
 -- PICKS
 -- =======================================================================
 
--- Group standings prediction: 1st and 2nd of each group.
--- Columns are nullable so a player can save partial progress.
+-- Group standings prediction: 1st, 2nd, 3rd of each group (4th is implied
+-- leftover). third_advances flags this group's 3rd as one of the eight
+-- "best 3rd-place" wildcards advancing to R32. Columns are nullable so a
+-- player can save partial progress.
 CREATE TABLE IF NOT EXISTS group_picks (
   player_id UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
   group_code TEXT NOT NULL REFERENCES groups(code),
   first_code TEXT REFERENCES teams(code),
   second_code TEXT REFERENCES teams(code),
+  third_code TEXT REFERENCES teams(code),
+  third_advances BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (player_id, group_code),
-  CHECK (first_code IS NULL OR second_code IS NULL OR first_code <> second_code)
+  PRIMARY KEY (player_id, group_code)
 );
 
 -- R32 draft: which team the player puts in each of the 32 R32 slots.

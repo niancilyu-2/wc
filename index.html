@@ -27,14 +27,21 @@ ABOUTME: Static shell; all dynamic content rendered by app.js.
 
     <section id="groups-section">
       <h2>Group Stage Picks</h2>
-      <p class="section-help">Pick who finishes 1st and 2nd in each group.</p>
+      <p class="section-help">Rank 1st, 2nd, and 3rd in each group. The 4th team is implied.</p>
       <div id="groups-grid"></div>
       <div id="groups-actions" class="picks-controls"></div>
     </section>
 
+    <section id="wildcards-section">
+      <h2>Wildcards — 8 best 3rd-place teams</h2>
+      <p class="section-help">Pick exactly 8 of the 12 third-place teams to advance to the Round of 32.</p>
+      <div id="wildcards-grid" class="wildcards-grid"></div>
+      <div id="wildcards-status" class="wildcards-status"></div>
+    </section>
+
     <section id="bracket-section">
       <h2>Knockout Bracket</h2>
-      <p class="section-help">Fill 32 R32 slots, then click winners all the way to the Final.</p>
+      <p class="section-help">Auto-populates from your group rankings and wildcards. Click winners through to the Final.</p>
       <div id="bracket"></div>
     </section>
 
