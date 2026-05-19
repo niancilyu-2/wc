@@ -1,0 +1,59 @@
+/*
+ * ABOUTME: Styles for WC 2026 bracket pick'em.
+ * ABOUTME: FIFA-inspired dark broadcast palette; bracket viz polished in Phase 5.
+ */
+
+:root {
+  --bg: #0a0e1a;
+  --surface: #141a2b;
+  --surface-2: #1c2440;
+  --border: #2a3454;
+  --text: #f4f6fb;
+  --text-muted: #8893b0;
+  --accent: #e30613;
+  --accent-2: #00b86b;
+  --warn: #f5b400;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+#site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 2rem;
+  background: var(--surface);
+  border-bottom: 2px solid var(--accent);
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+h2 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  display: grid;
+  gap: 2rem;
+}
