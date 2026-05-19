@@ -1,17 +1,23 @@
 // ABOUTME: Core application logic for WC 2026 bracket pick'em.
 // ABOUTME: Handles self-signup, picks, lock logic, leaderboard, and bracket rendering.
 
-// Two-stage model: groups lock at first WC kickoff; bracket opens once
-// FIFA-resolved R32 pairings are populated in the matches table and locks
-// at the first R32 kickoff. ?stage=X in the URL forces a stage for testing.
-const GROUP_LOCK_ISO   = '2026-06-11T13:00:00-06:00'; // Mexico vs South Africa
-const BRACKET_LOCK_ISO = '2026-06-28T15:00:00-07:00'; // First R32: SoFi Stadium
+// Single-phase model: everything (groups + R32 draft + bracket + tiebreaker)
+// is editable until the first WC kickoff on June 11.
+const LOCK_DATE_ISO = '2026-06-11T13:00:00-06:00'; // Mexico vs South Africa
 const STORAGE_KEY_PLAYER = 'wcbracket.player';
 
 const supabase = window.supabase.createClient(
   window.SUPABASE_URL,
   window.SUPABASE_ANON_KEY,
 );
+
+// Two-tier pick state:
+//   draft = working copy edited by clicks/auto-pick; never written to DB until Save/Submit.
+//   saved = last snapshot persisted to DB.
+// isDirty() compares the two; nav guards and Save button rely on the diff.
+function blankPicks() {
+  return { groups: {}, r32: {}, bracket: {}, tiebreaker: null };
+}
 
 const state = {
   player: null,
@@ -21,8 +27,8 @@ const state = {
   teamsByGroup: {},
   teamsByCode: {},
   picks: {
-    groups: {},  // { groupCode: { first, second } }
-    bracket: {}, // { matchId: winnerCode } — for r32 onwards
+    draft: blankPicks(),
+    saved: blankPicks(),
   },
 };
 
@@ -48,31 +54,25 @@ function flagHTML(teamCode) {
   return iso ? `<span class="fi fi-${iso}"></span>` : '';
 }
 
-function allR32Resolved() {
-  return state.matches
-    .filter((m) => m.stage === 'r32')
-    .every((m) => m.team_a_code && m.team_b_code);
+function isLocked() {
+  return new Date() >= new Date(LOCK_DATE_ISO);
 }
 
-function getStage() {
-  const override = new URLSearchParams(location.search).get('stage');
-  if (override === 'groups-open' || override === 'groups-locked' || override === 'bracket-open' || override === 'all-locked') {
-    return override;
-  }
-  const now = new Date();
-  if (now < new Date(GROUP_LOCK_ISO)) return 'groups-open';
-  if (now >= new Date(BRACKET_LOCK_ISO)) return 'all-locked';
-  return allR32Resolved() ? 'bracket-open' : 'groups-locked';
+function isSubmitted() {
+  return !!state.player?.groups_submitted_at && !!state.player?.bracket_submitted_at;
 }
 
-function isGroupsLocked() {
-  const s = getStage();
-  return s !== 'groups-open';
+// Edits are disabled when locked OR when the player has submitted (until Edit).
+function isEditingDisabled() {
+  return isLocked() || isSubmitted();
 }
 
-function isBracketLocked() {
-  const s = getStage();
-  return s !== 'bracket-open';
+function isDirty() {
+  return JSON.stringify(state.picks.draft) !== JSON.stringify(state.picks.saved);
+}
+
+function snapshot(obj) {
+  return JSON.parse(JSON.stringify(obj));
 }
 
 function getStoredPlayer() {
@@ -220,47 +220,68 @@ async function loadCurrentPlayer() {
 }
 
 async function loadMyPicks() {
-  const [groupRes, brktRes] = await Promise.all([
+  const [groupRes, r32Res, brktRes, tbRes] = await Promise.all([
     supabase.from('group_picks').select('*').eq('player_id', state.player.id),
+    supabase.from('r32_draft').select('*').eq('player_id', state.player.id),
     supabase.from('bracket_picks').select('*').eq('player_id', state.player.id),
+    supabase.from('tiebreaker_picks').select('*').eq('player_id', state.player.id).maybeSingle(),
   ]);
-  state.picks.groups = {};
-  state.picks.bracket = {};
+  const saved = blankPicks();
   if (!groupRes.error) {
     for (const row of groupRes.data) {
-      state.picks.groups[row.group_code] = {
-        first: row.first_code,
-        second: row.second_code,
-      };
+      saved.groups[row.group_code] = { first: row.first_code, second: row.second_code };
+    }
+  }
+  if (!r32Res.error) {
+    for (const row of r32Res.data) {
+      const { matchId, position } = slotToMatch(row.slot_index);
+      (saved.r32[matchId] ||= { a: null, b: null })[position] = row.team_code;
     }
   }
   if (!brktRes.error) {
     for (const row of brktRes.data) {
-      state.picks.bracket[row.match_id] = row.winner_code;
+      saved.bracket[row.match_id] = row.winner_code;
     }
   }
+  if (!tbRes.error && tbRes.data) {
+    saved.tiebreaker = tbRes.data.champion_total_goals;
+  }
+  state.picks.saved = saved;
+  state.picks.draft = snapshot(saved); // start clean
 }
 
 // ---------- Bracket helpers ----------
 
-// Resolve which team is in a given match's a/b slot.
-// 1) Use the team populated directly on the match row (group matches, and
-//    R32 once FIFA-resolved post-group-stage).
-// 2) Otherwise recurse through WXX/LXX labels for R16+, reading user picks.
+// Map between the r32_draft slot_index (1..32) and (matchId, position).
+function slotToMatch(slotIndex) {
+  const matchIndex = Math.floor((slotIndex - 1) / 2); // 0..15
+  const position = (slotIndex - 1) % 2 === 0 ? 'a' : 'b';
+  return { matchId: `M${73 + matchIndex}`, position };
+}
+
+function matchToSlot(matchId, position) {
+  const matchIndex = parseInt(matchId.slice(1), 10) - 73;
+  return matchIndex * 2 + (position === 'a' ? 1 : 2);
+}
+
+// Resolve which team is in a given match's a/b slot, reading from the draft.
 function teamForSlot(matchId, position) {
   const match = state.matches.find((m) => m.id === matchId);
   if (!match) return null;
-  const direct = position === 'a' ? match.team_a_code : match.team_b_code;
-  if (direct) return direct;
+  if (match.stage === 'group') {
+    return position === 'a' ? match.team_a_code : match.team_b_code;
+  }
+  if (match.stage === 'r32') {
+    return state.picks.draft.r32[matchId]?.[position] || null;
+  }
   const label = position === 'a' ? match.slot_a : match.slot_b;
   if (!label) return null;
   if (label.startsWith('W')) {
-    const priorId = `M${label.slice(1)}`;
-    return state.picks.bracket[priorId] || null;
+    return state.picks.draft.bracket[`M${label.slice(1)}`] || null;
   }
   if (label.startsWith('L')) {
     const priorId = `M${label.slice(1)}`;
-    const winner = state.picks.bracket[priorId];
+    const winner = state.picks.draft.bracket[priorId];
     if (!winner) return null;
     const a = teamForSlot(priorId, 'a');
     const b = teamForSlot(priorId, 'b');
@@ -268,8 +289,6 @@ function teamForSlot(matchId, position) {
     if (winner === b) return a;
     return null;
   }
-  // FIFA slot labels (e.g. '1A', '2A', '3A/B/C/D/F') stay unresolved until
-  // matches.team_a_code/b_code are populated for that R32 row.
   return null;
 }
 
@@ -283,8 +302,8 @@ const KNOCKOUT_ROUNDS = [
 
 // ---------- Group picks ----------
 
-async function saveGroupPick(groupCode, slot, teamCode) {
-  const current = state.picks.groups[groupCode] || { first: null, second: null };
+function toggleGroupPick(groupCode, slot, teamCode) {
+  const current = state.picks.draft.groups[groupCode] || { first: null, second: null };
   const other = slot === 'first' ? 'second' : 'first';
 
   // Toggling off the same team in the same slot clears it.
@@ -295,38 +314,17 @@ async function saveGroupPick(groupCode, slot, teamCode) {
     if (current[other] === teamCode) current[other] = null;
     current[slot] = teamCode;
   }
-
-  state.picks.groups[groupCode] = current;
+  state.picks.draft.groups[groupCode] = current;
   renderGroupCard(groupCode);
   renderGroupsActions();
   renderStatusBar();
-
-  const isEmpty = current.first === null && current.second === null;
-  if (isEmpty) {
-    const { error } = await supabase
-      .from('group_picks')
-      .delete()
-      .eq('player_id', state.player.id)
-      .eq('group_code', groupCode);
-    if (error) console.error('Delete group pick failed', error);
-    return;
-  }
-  const { error } = await supabase.from('group_picks').upsert(
-    {
-      player_id: state.player.id,
-      group_code: groupCode,
-      first_code: current.first,
-      second_code: current.second,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'player_id,group_code' },
-  );
-  if (error) console.error('Save group pick failed', error);
+  renderGlobalActions();
 }
 
 function groupCardHTML(groupCode) {
   const teams = state.teamsByGroup[groupCode] || [];
-  const pick = state.picks.groups[groupCode] || { first: null, second: null };
+  const pick = state.picks.draft.groups[groupCode] || { first: null, second: null };
+  const disabled = isEditingDisabled();
   const rows = teams
     .map((t) => {
       const isFirst = pick.first === t.code;
@@ -336,18 +334,18 @@ function groupCardHTML(groupCode) {
           ${flagHTML(t.code)}
           <span class="team-name" title="${t.name}">${t.name}</span>
           <button type="button" class="rank-btn ${isFirst ? 'is-active' : ''}"
-                  data-group="${groupCode}" data-slot="first" data-team="${t.code}">1st</button>
+                  data-group="${groupCode}" data-slot="first" data-team="${t.code}" ${disabled ? 'disabled' : ''}>1st</button>
           <button type="button" class="rank-btn ${isSecond ? 'is-active' : ''}"
-                  data-group="${groupCode}" data-slot="second" data-team="${t.code}">2nd</button>
+                  data-group="${groupCode}" data-slot="second" data-team="${t.code}" ${disabled ? 'disabled' : ''}>2nd</button>
         </li>`;
     })
     .join('');
 
   const statusText =
     pick.first && pick.second
-      ? `<span class="pick-status saved">✓ Saved</span>`
+      ? `<span class="pick-status saved">Complete</span>`
       : pick.first || pick.second
-      ? `<span class="pick-status partial">Pick the other slot to save</span>`
+      ? `<span class="pick-status partial">Pick the other slot</span>`
       : `<span class="pick-status empty">No picks yet</span>`;
 
   return `
@@ -372,8 +370,8 @@ function renderGroupPicks() {
   // Single delegated listener — survives card re-renders without leaking.
   grid.addEventListener('click', (e) => {
     const btn = e.target.closest('.rank-btn');
-    if (!btn || isGroupsLocked()) return;
-    saveGroupPick(btn.dataset.group, btn.dataset.slot, btn.dataset.team);
+    if (!btn || isEditingDisabled()) return;
+    toggleGroupPick(btn.dataset.group, btn.dataset.slot, btn.dataset.team);
   });
 }
 
@@ -388,100 +386,432 @@ function shuffled(arr) {
   return out;
 }
 
-async function autoFillEmptyGroups() {
-  if (isGroupsLocked()) return;
-  const rows = [];
+function autoFillEmptyGroups() {
+  if (isEditingDisabled()) return;
+  let changed = 0;
   for (const group of state.groups) {
-    const existing = state.picks.groups[group.code];
+    const existing = state.picks.draft.groups[group.code];
     if (existing && (existing.first || existing.second)) continue;
     const shuffledTeams = shuffled(state.teamsByGroup[group.code] || []);
     if (shuffledTeams.length < 2) continue;
-    const first = shuffledTeams[0].code;
-    const second = shuffledTeams[1].code;
-    state.picks.groups[group.code] = { first, second };
-    rows.push({
-      player_id: state.player.id,
-      group_code: group.code,
-      first_code: first,
-      second_code: second,
-      updated_at: new Date().toISOString(),
-    });
+    state.picks.draft.groups[group.code] = {
+      first: shuffledTeams[0].code,
+      second: shuffledTeams[1].code,
+    };
+    changed++;
   }
-  if (rows.length === 0) return;
-  const { error } = await supabase
-    .from('group_picks')
-    .upsert(rows, { onConflict: 'player_id,group_code' });
-  if (error) console.error('Auto-pick save failed', error);
+  if (!changed) return;
   renderGroupPicks();
   renderGroupsActions();
   renderStatusBar();
-}
-
-async function setGroupsSubmitted(submitted) {
-  const newValue = submitted ? new Date().toISOString() : null;
-  const { error } = await supabase
-    .from('players')
-    .update({ groups_submitted_at: newValue })
-    .eq('id', state.player.id);
-  if (error) {
-    console.error('Failed to update submission state', error);
-    return;
-  }
-  state.player.groups_submitted_at = newValue;
-  renderGroupsActions();
-  renderStatusBar();
-  updateNavigationGuards();
+  renderGlobalActions();
 }
 
 function groupsCompletePicks() {
-  return Object.values(state.picks.groups).filter((p) => p.first && p.second).length;
+  return Object.values(state.picks.draft.groups).filter((p) => p.first && p.second).length;
 }
 
 function renderGroupsActions() {
   const container = document.getElementById('groups-actions');
   if (!container) return;
-  const stage = getStage();
-  if (stage !== 'groups-open') {
-    container.innerHTML = state.player.groups_submitted_at
-      ? `<span class="completed-badge">✓ Submitted</span>`
-      : `<span class="completed-badge completed-badge--warn">Group picks not submitted before lock</span>`;
-    return;
-  }
-  const completed = groupsCompletePicks();
-  const submitted = !!state.player.groups_submitted_at;
-  const allDone = completed === 12;
+  const disabled = isEditingDisabled();
   container.innerHTML = `
-    <button type="button" class="btn-secondary" id="auto-pick-btn">🎲 Auto-pick empty groups</button>
-    ${
-      submitted
-        ? `<span class="completed-badge">✓ Submitted</span>
-           <button type="button" class="btn-link" id="edit-groups-btn">Edit picks</button>`
-        : `<button type="button" class="btn-primary" id="complete-groups-btn" ${allDone ? '' : 'disabled'}>
-             ${allDone ? 'Save / Complete group picks' : `Pick all 12 groups (${completed} / 12)`}
-           </button>`
-    }
+    <button type="button" class="btn-secondary" id="auto-pick-btn" ${disabled ? 'disabled' : ''}>🎲 Auto-pick empty groups</button>
+    <span class="picks-controls-note">Group picks made in draft: ${groupsCompletePicks()} / 12</span>
   `;
 }
 
 function wireGroupsActions() {
-  document.getElementById('groups-actions').addEventListener('click', async (e) => {
-    if (e.target.id === 'auto-pick-btn') {
-      await autoFillEmptyGroups();
-    } else if (e.target.id === 'complete-groups-btn') {
-      await setGroupsSubmitted(true);
-    } else if (e.target.id === 'edit-groups-btn') {
-      await setGroupsSubmitted(false);
+  document.getElementById('groups-actions').addEventListener('click', (e) => {
+    if (e.target.id === 'auto-pick-btn') autoFillEmptyGroups();
+  });
+}
+
+// ---------- R32 free-draft (team picker) ----------
+
+function locationOfTeamInDraft(teamCode) {
+  for (const [matchId, slots] of Object.entries(state.picks.draft.r32)) {
+    if (slots.a === teamCode) return { matchId, position: 'a' };
+    if (slots.b === teamCode) return { matchId, position: 'b' };
+  }
+  return null;
+}
+
+function showR32TeamPicker(matchId, position) {
+  return new Promise((resolve) => {
+    const root = document.getElementById('modal-root');
+    const groupRows = state.groups
+      .map((g) => {
+        const teams = state.teamsByGroup[g.code] || [];
+        return `
+          <div class="picker-group">
+            <h4>Group ${g.code}</h4>
+            <ul>
+              ${teams
+                .map((t) => {
+                  const placedAt = locationOfTeamInDraft(t.code);
+                  const here = placedAt && placedAt.matchId === matchId && placedAt.position === position;
+                  const elsewhere = placedAt && !here;
+                  return `
+                    <li>
+                      <button type="button" class="picker-team ${here ? 'is-here' : ''} ${elsewhere ? 'is-elsewhere' : ''}"
+                              data-team="${t.code}"
+                              ${elsewhere ? 'title="Already placed in M' + placedAt.matchId.slice(1) + '. Clicking moves it here."' : ''}>
+                        ${flagHTML(t.code)}
+                        <span>${t.name}</span>
+                        ${elsewhere ? `<small>in M${placedAt.matchId.slice(1)}</small>` : ''}
+                        ${here ? `<small>(currently here)</small>` : ''}
+                      </button>
+                    </li>`;
+                })
+                .join('')}
+            </ul>
+          </div>`;
+      })
+      .join('');
+
+    root.innerHTML = `
+      <div class="modal-overlay">
+        <div class="modal picker-modal">
+          <h2>Pick a team for ${matchId} (slot ${position.toUpperCase()})</h2>
+          <p>Each team can occupy only one R32 slot. Picking one already placed moves it here.</p>
+          <div class="picker-grid">${groupRows}</div>
+          <div class="picker-actions">
+            <button type="button" class="btn-link" id="picker-clear">Clear this slot</button>
+            <button type="button" class="btn-link" id="picker-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const cleanup = (result) => {
+      root.innerHTML = '';
+      resolve(result);
+    };
+    root.querySelectorAll('.picker-team').forEach((btn) => {
+      btn.addEventListener('click', () => cleanup({ action: 'pick', team: btn.dataset.team }));
+    });
+    document.getElementById('picker-clear').addEventListener('click', () => cleanup({ action: 'clear' }));
+    document.getElementById('picker-cancel').addEventListener('click', () => cleanup({ action: 'cancel' }));
+  });
+}
+
+function setR32Slot(matchId, position, teamCode) {
+  if (teamCode === null) {
+    state.picks.draft.r32[matchId] ||= { a: null, b: null };
+    state.picks.draft.r32[matchId][position] = null;
+    return;
+  }
+  // If team is currently in another R32 slot, vacate that slot.
+  const existing = locationOfTeamInDraft(teamCode);
+  if (existing && !(existing.matchId === matchId && existing.position === position)) {
+    state.picks.draft.r32[existing.matchId][existing.position] = null;
+  }
+  state.picks.draft.r32[matchId] ||= { a: null, b: null };
+  state.picks.draft.r32[matchId][position] = teamCode;
+}
+
+function setBracketWinner(matchId, teamCode) {
+  // Toggle off if already the winner; otherwise set.
+  if (state.picks.draft.bracket[matchId] === teamCode) {
+    delete state.picks.draft.bracket[matchId];
+  } else {
+    state.picks.draft.bracket[matchId] = teamCode;
+  }
+}
+
+// ---------- Persistence: flush draft to DB ----------
+
+function diffMap(saved, draft, keyFn) {
+  // Returns { upserts: [...], deletes: [keys...] } for shallow {key: value} maps.
+  const upserts = [];
+  const deletes = [];
+  for (const key of Object.keys(draft)) {
+    if (keyFn(draft[key], saved[key])) upserts.push(key);
+  }
+  for (const key of Object.keys(saved)) {
+    if (!(key in draft)) deletes.push(key);
+  }
+  return { upserts, deletes };
+}
+
+async function persistGroupPicks() {
+  const saved = state.picks.saved.groups;
+  const draft = state.picks.draft.groups;
+  const upserts = [];
+  const deletes = [];
+  for (const code of Object.keys(draft)) {
+    const d = draft[code];
+    const s = saved[code];
+    const empty = !d.first && !d.second;
+    if (empty) {
+      if (s) deletes.push(code);
+      continue;
     }
+    if (!s || s.first !== d.first || s.second !== d.second) {
+      upserts.push({
+        player_id: state.player.id,
+        group_code: code,
+        first_code: d.first,
+        second_code: d.second,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  }
+  for (const code of Object.keys(saved)) {
+    if (!(code in draft)) deletes.push(code);
+  }
+  if (upserts.length) {
+    const { error } = await supabase
+      .from('group_picks')
+      .upsert(upserts, { onConflict: 'player_id,group_code' });
+    if (error) throw error;
+  }
+  if (deletes.length) {
+    const { error } = await supabase
+      .from('group_picks')
+      .delete()
+      .eq('player_id', state.player.id)
+      .in('group_code', deletes);
+    if (error) throw error;
+  }
+}
+
+async function persistR32Picks() {
+  const saved = state.picks.saved.r32;
+  const draft = state.picks.draft.r32;
+  const upserts = [];
+  const deleteSlotIndexes = [];
+  const seen = new Set();
+  for (const matchId of Object.keys(draft)) {
+    for (const pos of ['a', 'b']) {
+      const teamCode = draft[matchId]?.[pos] || null;
+      const savedTeam = saved[matchId]?.[pos] || null;
+      const slotIndex = matchToSlot(matchId, pos);
+      seen.add(slotIndex);
+      if (teamCode === savedTeam) continue;
+      if (teamCode === null) {
+        deleteSlotIndexes.push(slotIndex);
+      } else {
+        upserts.push({
+          player_id: state.player.id,
+          slot_index: slotIndex,
+          team_code: teamCode,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+  for (const matchId of Object.keys(saved)) {
+    for (const pos of ['a', 'b']) {
+      const slotIndex = matchToSlot(matchId, pos);
+      if (seen.has(slotIndex)) continue;
+      if (saved[matchId]?.[pos]) deleteSlotIndexes.push(slotIndex);
+    }
+  }
+  if (upserts.length) {
+    const { error } = await supabase
+      .from('r32_draft')
+      .upsert(upserts, { onConflict: 'player_id,slot_index' });
+    if (error) throw error;
+  }
+  if (deleteSlotIndexes.length) {
+    const { error } = await supabase
+      .from('r32_draft')
+      .delete()
+      .eq('player_id', state.player.id)
+      .in('slot_index', deleteSlotIndexes);
+    if (error) throw error;
+  }
+}
+
+async function persistBracketPicks() {
+  const saved = state.picks.saved.bracket;
+  const draft = state.picks.draft.bracket;
+  const upserts = [];
+  const deletes = [];
+  for (const matchId of Object.keys(draft)) {
+    if (saved[matchId] !== draft[matchId]) {
+      upserts.push({
+        player_id: state.player.id,
+        match_id: matchId,
+        winner_code: draft[matchId],
+        updated_at: new Date().toISOString(),
+      });
+    }
+  }
+  for (const matchId of Object.keys(saved)) {
+    if (!(matchId in draft)) deletes.push(matchId);
+  }
+  if (upserts.length) {
+    const { error } = await supabase
+      .from('bracket_picks')
+      .upsert(upserts, { onConflict: 'player_id,match_id' });
+    if (error) throw error;
+  }
+  if (deletes.length) {
+    const { error } = await supabase
+      .from('bracket_picks')
+      .delete()
+      .eq('player_id', state.player.id)
+      .in('match_id', deletes);
+    if (error) throw error;
+  }
+}
+
+async function persistTiebreaker() {
+  const draft = state.picks.draft.tiebreaker;
+  const saved = state.picks.saved.tiebreaker;
+  if (draft === saved) return;
+  if (draft === null || draft === undefined) {
+    const { error } = await supabase
+      .from('tiebreaker_picks')
+      .delete()
+      .eq('player_id', state.player.id);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase.from('tiebreaker_picks').upsert(
+    {
+      player_id: state.player.id,
+      champion_total_goals: draft,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'player_id' },
+  );
+  if (error) throw error;
+}
+
+async function saveDraft() {
+  await persistGroupPicks();
+  await persistR32Picks();
+  await persistBracketPicks();
+  await persistTiebreaker();
+  state.picks.saved = snapshot(state.picks.draft);
+}
+
+async function submitPicks() {
+  await saveDraft();
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('players')
+    .update({ groups_submitted_at: now, bracket_submitted_at: now })
+    .eq('id', state.player.id);
+  if (error) throw error;
+  state.player.groups_submitted_at = now;
+  state.player.bracket_submitted_at = now;
+}
+
+async function unsubmitPicks() {
+  const { error } = await supabase
+    .from('players')
+    .update({ groups_submitted_at: null, bracket_submitted_at: null })
+    .eq('id', state.player.id);
+  if (error) throw error;
+  state.player.groups_submitted_at = null;
+  state.player.bracket_submitted_at = null;
+}
+
+// ---------- Global actions bar (Save / Submit / Edit) ----------
+
+function renderGlobalActions() {
+  const bar = document.getElementById('global-actions');
+  if (!bar) return;
+  const locked = isLocked();
+  const submitted = isSubmitted();
+  const dirty = isDirty();
+
+  if (locked) {
+    bar.innerHTML = `<span class="completed-badge">Picks are locked.</span>`;
+    return;
+  }
+  if (submitted) {
+    bar.innerHTML = `
+      <span class="completed-badge">✓ Submitted</span>
+      <button type="button" class="btn-secondary" id="edit-picks-btn">Edit picks</button>`;
+    return;
+  }
+  bar.innerHTML = `
+    <span class="${dirty ? 'unsaved-indicator' : 'saved-indicator'}">
+      ${dirty ? '● Unsaved changes' : 'All changes saved'}
+    </span>
+    <button type="button" class="btn-secondary" id="save-picks-btn" ${dirty ? '' : 'disabled'}>Save my picks</button>
+    <button type="button" class="btn-primary" id="submit-picks-btn">Submit</button>
+  `;
+}
+
+function wireGlobalActions() {
+  document.getElementById('global-actions').addEventListener('click', async (e) => {
+    if (e.target.id === 'save-picks-btn') {
+      try {
+        await saveDraft();
+      } catch (err) {
+        console.error('Save failed', err);
+        alert('Save failed — see console.');
+        return;
+      }
+      renderGlobalActions();
+      renderStatusBar();
+      updateNavigationGuards();
+    } else if (e.target.id === 'submit-picks-btn') {
+      try {
+        await submitPicks();
+      } catch (err) {
+        console.error('Submit failed', err);
+        alert('Submit failed — see console.');
+        return;
+      }
+      // Re-render everything to reflect the new disabled state.
+      renderAll();
+    } else if (e.target.id === 'edit-picks-btn') {
+      try {
+        await unsubmitPicks();
+      } catch (err) {
+        console.error('Unsubmit failed', err);
+        return;
+      }
+      renderAll();
+    }
+  });
+}
+
+function renderAll() {
+  renderUserBar();
+  renderStatusBar();
+  renderGroupPicks();
+  renderGroupsActions();
+  renderBracket();
+  renderTiebreaker();
+  renderGlobalActions();
+  renderLeaderboardPlaceholder();
+  updateNavigationGuards();
+}
+
+// ---------- Tiebreaker (will get full UI in 2d) ----------
+
+function renderTiebreaker() {
+  const root = document.getElementById('tiebreaker');
+  if (!root) return;
+  const disabled = isEditingDisabled();
+  const value = state.picks.draft.tiebreaker ?? '';
+  root.innerHTML = `
+    <label class="tiebreaker-label">
+      <span>Champion's total goals across the tournament:</span>
+      <input type="number" id="tiebreaker-input" min="0" max="60" value="${value}" ${disabled ? 'disabled' : ''} />
+    </label>
+  `;
+  document.getElementById('tiebreaker-input').addEventListener('input', (e) => {
+    const v = e.target.value;
+    state.picks.draft.tiebreaker = v === '' ? null : Number(v);
+    renderGlobalActions();
   });
 }
 
 // ---------- Navigation guards (beforeunload + internal link intercept) ----------
 
 function shouldWarnOnLeave() {
-  const stage = getStage();
-  if (stage === 'groups-open' && !state.player.groups_submitted_at) return true;
-  if (stage === 'bracket-open' && !state.player.bracket_submitted_at) return true;
-  return false;
+  if (isLocked()) return false;
+  return isDirty() || !isSubmitted();
 }
 
 function beforeUnloadHandler(e) {
@@ -497,16 +827,23 @@ function updateNavigationGuards() {
   }
 }
 
-function showLeaveSiteModal(targetHref) {
+function showLeaveSiteModal() {
   return new Promise((resolve) => {
     const root = document.getElementById('modal-root');
+    const dirty = isDirty();
+    const submitted = isSubmitted();
     root.innerHTML = `
       <div class="modal-overlay">
         <div class="modal">
           <h2>You haven't saved your progress</h2>
-          <p>Your picks are auto-saved to the database, but you haven't hit <strong>Complete</strong> yet. Save now and continue, or leave without saving?</p>
+          <p>${
+            dirty
+              ? 'You have unsaved picks. Save them now, leave without saving, or stay here.'
+              : 'Your picks are saved to the database, but you haven\'t hit <strong>Submit</strong> yet.'
+          }</p>
           <div class="modal-actions">
-            <button type="button" class="btn-primary" id="leave-save">Save &amp; continue</button>
+            ${dirty ? `<button type="button" class="btn-primary" id="leave-save">Save &amp; continue</button>` : ''}
+            ${!submitted ? `<button type="button" class="btn-primary" id="leave-submit">Submit &amp; continue</button>` : ''}
             <button type="button" class="btn-secondary" id="leave-go">Leave without saving</button>
             <button type="button" class="btn-link" id="leave-cancel">Cancel</button>
           </div>
@@ -517,14 +854,13 @@ function showLeaveSiteModal(targetHref) {
       root.innerHTML = '';
       resolve(decision);
     };
-    document.getElementById('leave-save').addEventListener('click', async () => {
-      const stage = getStage();
-      if (stage === 'groups-open') await setGroupsSubmitted(true);
-      if (stage === 'bracket-open') {
-        // bracket submit lands in 2e; for now still treat as save.
-        // No-op: leave a placeholder so future work fills it in.
-      }
+    document.getElementById('leave-save')?.addEventListener('click', async () => {
+      try { await saveDraft(); } catch (err) { console.error(err); }
       finish('save');
+    });
+    document.getElementById('leave-submit')?.addEventListener('click', async () => {
+      try { await submitPicks(); } catch (err) { console.error(err); }
+      finish('submit');
     });
     document.getElementById('leave-go').addEventListener('click', () => finish('go'));
     document.getElementById('leave-cancel').addEventListener('click', () => finish('cancel'));
@@ -563,9 +899,9 @@ function teamPillHTML(teamCode, opts = {}) {
 // Bracket winner is only meaningful when it matches one of the current teams in
 // the match (the underlying R32 draft can change after a winner was saved).
 function effectiveWinner(matchId, teamA, teamB) {
-  const saved = state.picks.bracket[matchId];
-  if (!saved) return null;
-  if (saved === teamA || saved === teamB) return saved;
+  const pick = state.picks.draft.bracket[matchId];
+  if (!pick) return null;
+  if (pick === teamA || pick === teamB) return pick;
   return null;
 }
 
@@ -574,13 +910,35 @@ function matchCellHTML(matchId) {
   if (!match) return '';
   const teamA = teamForSlot(matchId, 'a');
   const teamB = teamForSlot(matchId, 'b');
-  const canAdvance = !!(teamA && teamB) && getStage() === 'bracket-open';
+  const isR32 = match.stage === 'r32';
+  const disabled = isEditingDisabled();
+  const canAdvance = !!(teamA && teamB);
   const winner = effectiveWinner(matchId, teamA, teamB);
 
   const slotHTML = (position, team) => {
     const isWinner = team && winner === team;
-    const pill = teamPillHTML(team, { placeholder: '?' });
-    if (!team || !canAdvance) {
+    const pill = teamPillHTML(team, { placeholder: isR32 ? '— pick team —' : '?' });
+
+    if (isR32 && !team) {
+      return `
+        <button type="button" class="bracket-slot is-empty"
+                data-match="${matchId}" data-position="${position}" data-action="r32-pick" ${disabled ? 'disabled' : ''}>
+          ${pill}
+        </button>`;
+    }
+
+    if (isR32) {
+      const teamEl = canAdvance && !disabled
+        ? `<button type="button" class="slot-team" data-match="${matchId}" data-team="${team}" data-action="advance">${pill}</button>`
+        : `<div class="slot-team slot-team--readonly">${pill}</div>`;
+      return `
+        <div class="bracket-slot bracket-slot--filled ${isWinner ? 'is-winner' : ''}">
+          ${teamEl}
+          <button type="button" class="slot-edit" data-match="${matchId}" data-position="${position}" data-action="r32-edit" title="Change team" ${disabled ? 'disabled' : ''}>✎</button>
+        </div>`;
+    }
+
+    if (!team || !canAdvance || disabled) {
       return `<div class="bracket-slot bracket-slot--readonly ${isWinner ? 'is-winner' : ''}">${pill}</div>`;
     }
     return `
@@ -613,25 +971,6 @@ function bracketColumnHTML(round) {
 
 function renderBracket() {
   const root = document.getElementById('bracket');
-  const stage = getStage();
-
-  if (stage === 'groups-open') {
-    root.innerHTML = `
-      <div class="bracket-locked-notice">
-        <strong>The bracket opens after group stage ends.</strong>
-        <p>Focus on your group standings for now. After the last group match on June 27, the R32 pairings will be set from real qualifying teams and you'll pick winners through the Final.</p>
-      </div>`;
-    return;
-  }
-  if (stage === 'groups-locked') {
-    root.innerHTML = `
-      <div class="bracket-locked-notice">
-        <strong>Group stage in progress — bracket unlocks once R32 pairings are confirmed.</strong>
-        <p>Match results stream in automatically. As soon as all 16 R32 pairings are known, this section will fill with the real bracket and you can pick winners through the Final.</p>
-      </div>`;
-    return;
-  }
-
   const thirdMatch = state.matches.find((m) => m.stage === 'third');
   root.innerHTML = `
     <div class="bracket-grid">
@@ -644,41 +983,30 @@ function renderBracket() {
   `;
 }
 
-async function saveBracketPick(matchId, teamCode) {
-  const current = state.picks.bracket[matchId];
-  if (current === teamCode) {
-    // Toggle off: un-pick this winner.
-    delete state.picks.bracket[matchId];
-    const { error } = await supabase
-      .from('bracket_picks')
-      .delete()
-      .eq('player_id', state.player.id)
-      .eq('match_id', matchId);
-    if (error) console.error('Delete bracket pick failed', error);
-    return;
-  }
-  state.picks.bracket[matchId] = teamCode;
-  const { error } = await supabase.from('bracket_picks').upsert(
-    {
-      player_id: state.player.id,
-      match_id: matchId,
-      winner_code: teamCode,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'player_id,match_id' },
-  );
-  if (error) console.error('Save bracket pick failed', error);
-}
-
 function wireBracketListener() {
   // Attached once to #bracket; survives any number of innerHTML re-renders.
   document.getElementById('bracket').addEventListener('click', async (e) => {
-    if (isBracketLocked()) return;
+    if (isEditingDisabled()) return;
+
     const advance = e.target.closest('[data-action="advance"]');
-    if (!advance) return;
-    await saveBracketPick(advance.dataset.match, advance.dataset.team);
-    renderBracket();
-    renderStatusBar();
+    if (advance) {
+      setBracketWinner(advance.dataset.match, advance.dataset.team);
+      renderBracket();
+      renderStatusBar();
+      renderGlobalActions();
+      return;
+    }
+
+    const pickBtn = e.target.closest('[data-action="r32-pick"], [data-action="r32-edit"]');
+    if (pickBtn) {
+      const { match, position } = pickBtn.dataset;
+      const result = await showR32TeamPicker(match, position);
+      if (result.action === 'cancel') return;
+      setR32Slot(match, position, result.action === 'clear' ? null : result.team);
+      renderBracket();
+      renderStatusBar();
+      renderGlobalActions();
+    }
   });
 }
 
@@ -708,57 +1036,40 @@ function formatCountdown(ms) {
 
 function renderStatusBar() {
   const bar = document.getElementById('status-bar');
-  const stage = getStage();
-  const groupLock = new Date(GROUP_LOCK_ISO);
-  const bracketLock = new Date(BRACKET_LOCK_ISO);
+  const locked = isLocked();
+  const lockMoment = new Date(LOCK_DATE_ISO);
   const now = new Date();
 
-  const groupsPicked = Object.values(state.picks.groups).filter(
+  const groupsPicked = Object.values(state.picks.draft.groups).filter(
     (p) => p.first && p.second,
   ).length;
+  const r32Filled = Object.values(state.picks.draft.r32).reduce(
+    (n, slot) => n + (slot.a ? 1 : 0) + (slot.b ? 1 : 0),
+    0,
+  );
   const winnersPicked = state.matches
     .filter((m) => m.stage !== 'group')
     .filter((m) => effectiveWinner(m.id, teamForSlot(m.id, 'a'), teamForSlot(m.id, 'b'))).length;
 
-  let phaseLabel;
-  let phaseSub;
-  if (stage === 'groups-open') {
-    phaseLabel = `Group picks lock in ${formatCountdown(groupLock - now)}`;
-    phaseSub = groupLock.toLocaleString();
-  } else if (stage === 'groups-locked') {
-    phaseLabel = 'Group stage in progress — bracket opens after R32 pairings are set';
-    phaseSub = `R32 starts ${bracketLock.toLocaleString()}`;
-  } else if (stage === 'bracket-open') {
-    phaseLabel = `Bracket locks in ${formatCountdown(bracketLock - now)}`;
-    phaseSub = bracketLock.toLocaleString();
-  } else {
-    phaseLabel = 'All picks locked';
-    phaseSub = '';
-  }
-
   bar.innerHTML = `
     <div class="status-card">
       <div>
-        <strong>${phaseLabel}</strong>
-        <div class="status-sub">${phaseSub}</div>
+        <strong>${locked ? 'Picks locked' : `Picks lock in ${formatCountdown(lockMoment - now)}`}</strong>
+        <div class="status-sub">${lockMoment.toLocaleString()}</div>
       </div>
-      <div>
-        <strong>Group picks: ${groupsPicked} / 12</strong>
-      </div>
-      <div>
-        <strong>Winner picks: ${winnersPicked} / 32</strong>
-      </div>
+      <div><strong>Groups: ${groupsPicked} / 12</strong></div>
+      <div><strong>R32 slots: ${r32Filled} / 32</strong></div>
+      <div><strong>Winner picks: ${winnersPicked} / 32</strong></div>
     </div>
   `;
 }
 
 function renderLeaderboardPlaceholder() {
   const lb = document.getElementById('leaderboard');
-  const stage = getStage();
-  if (stage === 'groups-open') {
-    lb.innerHTML = '<p>Leaderboard goes live at first kickoff on June 11.</p>';
-  } else {
+  if (isLocked()) {
     lb.innerHTML = '<p>Scores update as matches complete.</p>';
+  } else {
+    lb.innerHTML = '<p>Leaderboard goes live at first kickoff on June 11.</p>';
   }
 }
 
@@ -772,15 +1083,11 @@ async function init() {
   renderUserBar();
   await Promise.all([loadReferenceData(), loadCurrentPlayer()]);
   await loadMyPicks();
-  renderStatusBar();
-  renderGroupPicks();
-  renderGroupsActions();
+  renderAll();
   wireGroupsActions();
-  renderBracket();
   wireBracketListener();
-  renderLeaderboardPlaceholder();
+  wireGlobalActions();
   wireInternalLinkGuards();
-  updateNavigationGuards();
 }
 
 document.addEventListener('DOMContentLoaded', init);

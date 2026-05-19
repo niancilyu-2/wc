@@ -72,7 +72,7 @@ h2 {
 main {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 2rem 2rem 6rem;
   display: grid;
   gap: 2rem;
 }
@@ -561,24 +561,74 @@ main {
   padding-bottom: 1rem;
 }
 
-.bracket-locked-notice {
+/* ---- Global actions bar (sticky bottom) ---- */
+
+.global-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 2rem;
   background: var(--surface);
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  padding: 1.5rem;
+  border-top: 2px solid var(--accent);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.unsaved-indicator {
+  color: var(--warn);
+  font-weight: 700;
+  font-size: 0.875rem;
+  margin-right: auto;
+}
+
+.saved-indicator {
   color: var(--text-muted);
+  font-size: 0.875rem;
+  margin-right: auto;
 }
 
-.bracket-locked-notice strong {
+/* ---- Picks controls note (under group cards) ---- */
+
+.picks-controls-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ---- Tiebreaker input ---- */
+
+.tiebreaker-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+}
+
+.tiebreaker-label input[type="number"] {
+  width: 100px;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
   color: var(--text);
-  display: block;
-  margin-bottom: 0.5rem;
+  font: inherit;
 }
 
-.bracket-locked-notice p {
-  margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
+.tiebreaker-label input[type="number"]:disabled {
+  opacity: 0.6;
+}
+
+/* ---- Disabled rank buttons ---- */
+
+.rank-btn:disabled,
+.bracket-slot:disabled,
+.slot-edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .bracket-grid {

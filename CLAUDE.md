@@ -19,23 +19,27 @@ Guidance for Claude Code when working in this repo.
 - Knockouts: R32 → R16 → QF → SF → Final (+ 3rd place)
 - 104 matches total; tournament runs June 11 – July 19, 2026
 
-## Pick model (two stages)
+## Pick model (single phase)
 
-**Phase 1 — Group standings (locks June 11 first kickoff)**
-- For each of the 12 groups, predict 1st and 2nd.
+All sections open from day 1 and lock at the first WC kickoff on June 11.
 
-**Phase 2 — Bracket (opens after group stage, locks at first R32 kickoff June 28)**
-- The R32 matches are populated with the real qualifying teams (24 group winners/runners-up + 8 best 3rds) via FIFA's bracket resolution rules. Admin/auto-fetch sets `matches.team_a_code` / `team_b_code` for M73–M88 once group stage ends.
-- User clicks winners through R32 → R16 → QF → SF → Final, plus the 3rd-place match.
-- Tiebreaker: predicted total goals scored by the eventual champion (a single integer).
-- Optional exact-score predictions for any knockout match (R32+), earning bonus points.
+- **Group standings**: predict 1st and 2nd of each of the 12 groups.
+- **R32 free-draft**: place any 32 of the 48 teams into the 32 R32 slots (implicitly chooses your 8 best-3rd wildcards). Each team may only occupy one R32 slot.
+- **Bracket winners**: click a team in each match to advance through R32 → R16 → QF → SF → Final, plus the 3rd-place match.
+- **Tiebreaker**: predicted total goals scored by the eventual champion (single integer).
+- Optional exact-score bonus predictions for knockout matches (R32+) land in 2d.
+
+## Two-tier save model
+
+- Clicks edit a **draft** state held in memory; never written to DB on click.
+- **Save my picks**: flushes the draft to DB. Picks remain editable.
+- **Submit**: flushes the draft to DB AND sets `players.groups_submitted_at` / `bracket_submitted_at`. Editing is disabled until **Edit picks** clears those timestamps.
+- **Auto-pick (groups only)**: shuffles teams in any empty group and assigns the top two as 1st/2nd. Updates draft only — Save to persist.
+- Navigation guards (browser `beforeunload` + custom modal on internal links) fire whenever the draft differs from the saved snapshot OR the player hasn't submitted.
 
 ## Lock & visibility
 
-- `GROUP_LOCK_ISO` (June 11 13:00 -06:00) freezes group picks.
-- Bracket opens once all 16 R32 matches have `team_a_code` and `team_b_code` populated (or earlier via `?stage=bracket-open` dev override).
-- `BRACKET_LOCK_ISO` (June 28 15:00 -07:00) freezes bracket picks.
-- Other users' picks are hidden until lock; revealed at first kickoff of each stage.
+- `LOCK_DATE_ISO` (June 11 13:00 -06:00) freezes all picks. After lock, everyone's picks are revealed and the leaderboard goes live.
 
 ## Scoring (final)
 
