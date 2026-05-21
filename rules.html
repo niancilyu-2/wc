@@ -7,15 +7,16 @@ ABOUTME: Linked from index.html header; no JS or Supabase required.
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rules & Scoring · WC 2026 Bracket</title>
+  <title>Rules & Scoring · 2026 World Cup Bracket Challenge</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.2.3/css/flag-icons.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header id="site-header">
-    <h1>WC 2026 BRACKET</h1>
+    <h1>2026 World Cup Bracket Challenge</h1>
     <nav class="site-nav">
       <a href="index.html">← Back to picks</a>
+      <a href="leaderboard.html">Leaderboard</a>
     </nav>
   </header>
 
@@ -31,11 +32,10 @@ ABOUTME: Linked from index.html header; no JS or Supabase required.
       <h3>How to play</h3>
       <ol class="rules-list">
         <li>Pick your name (or add yourself) on the home page.</li>
-        <li>For each of the 12 groups, predict who finishes <strong>1st</strong> and <strong>2nd</strong>.</li>
-        <li>Fill the 32 <strong>Round of 32</strong> slots with any teams you want. The eight "best 3rd-place" wildcards are implicit — drop in whichever teams you think will sneak through.</li>
+        <li>For each of the 12 groups, rank all 4 teams from <strong>1st to 4th</strong> by tapping two teams to swap their positions. Only your 1st and 2nd score group-stage points; your 3rd determines wildcard eligibility.</li>
+        <li>Pick exactly <strong>8 of the 12 third-place teams</strong> to advance as wildcards. The R32 bracket auto-populates from FIFA's official Annexe&nbsp;C lookup table.</li>
         <li>Click winners through <strong>R32 → R16 → QF → SF → Final</strong>, plus the <strong>3rd-place match</strong>.</li>
-        <li>Enter your <strong>tiebreaker</strong>: how many goals will the eventual champion score across the entire tournament?</li>
-        <li>Optionally, predict <strong>exact final scores</strong> for any knockout match for bonus points.</li>
+        <li>Your <strong>champion</strong> is whoever you pick to win the Final. In the tiebreaker, predict that champion's <strong>average goals per game</strong> across the whole tournament.</li>
         <li>Click <strong>Save my picks</strong> as you go (commits your current draft to the database). Click <strong>Submit</strong> when you're done — finalizes everything until you click Edit.</li>
       </ol>
     </section>
@@ -134,8 +134,9 @@ ABOUTME: Linked from index.html header; no JS or Supabase required.
 
     <section class="rules-section">
       <h3>The tiebreaker, explained</h3>
-      <p>If two players finish on equal points, the player whose tiebreaker number is closest to the <em>actual</em> champion's total tournament goals wins.</p>
-      <p>One key thing: the prediction is about the <strong>real</strong> champion, not the team you picked to win. If you predict <em>"Brazil will win and score 22 goals"</em> but Argentina actually lifts the trophy with 14 goals, your tiebreaker number (22) is compared against 14 (off by 8). Pick a realistic number for whoever you think wins.</p>
+      <p>Your <strong>champion</strong> is whichever team you've picked to win the Final &mdash; you don't choose them separately. The tiebreaker number is your prediction of that champion's <strong>average goals per game</strong> across every match they play (group stage + knockouts).</p>
+      <p>If two players finish tied on points, whoever's prediction is closest to the real tournament average for the <em>actual</em> champion wins the tiebreaker. The team you picked doesn't have to be the team that actually wins &mdash; we always compare against reality.</p>
+      <p>Decimals are fine: 2.3, 1.75, etc. A typical World Cup winner averages somewhere between 1.5 and 2.5 goals per game.</p>
     </section>
 
     <section class="rules-section">
@@ -146,10 +147,11 @@ ABOUTME: Linked from index.html header; no JS or Supabase required.
     <section class="rules-section">
       <h3>Picks model: details</h3>
       <ul class="rules-list">
-        <li><strong>Group picks:</strong> save partial progress (just 1st without 2nd) at any time.</li>
-        <li><strong>R32 draft:</strong> each team can only occupy one R32 slot — picking a team already placed elsewhere moves it.</li>
+        <li><strong>Group ranks:</strong> tap a team to highlight it, then tap a second team in the same group to swap their positions. Tap the same team twice to deselect. The default order is FIFA pot order until you make your first swap.</li>
+        <li><strong>Auto-fill:</strong> shuffles all four teams in each empty group so the top three become a random 1st/2nd/3rd. Groups you've already touched are left alone.</li>
+        <li><strong>Wildcards:</strong> after every group is ranked, pick exactly 8 of the 12 third-place teams. The R32 matchups are looked up from FIFA's official Annexe&nbsp;C table &mdash; you don't place teams into slots yourself.</li>
         <li><strong>Winner picks:</strong> click a team in a match to advance them; click again to un-pick.</li>
-        <li><strong>Exact-score bonuses:</strong> optional. Predict 2-1, 3-0, etc. for any knockout match. Earn +2 if your score matches the real final score exactly.</li>
+        <li><strong>Exact-score bonuses:</strong> optional. Predict 2-1, 3-0, etc. for any knockout match. Earn +2 if your score matches the real final score exactly. <em>(UI coming soon.)</em></li>
       </ul>
     </section>
 

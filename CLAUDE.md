@@ -23,11 +23,11 @@ Guidance for Claude Code when working in this repo.
 
 All sections open from day 1 and lock at the first WC kickoff on June 11.
 
-- **Group standings**: predict 1st and 2nd of each of the 12 groups.
-- **R32 free-draft**: place any 32 of the 48 teams into the 32 R32 slots (implicitly chooses your 8 best-3rd wildcards). Each team may only occupy one R32 slot.
-- **Bracket winners**: click a team in each match to advance through R32 → R16 → QF → SF → Final, plus the 3rd-place match.
-- **Tiebreaker**: predicted total goals scored by the eventual champion (single integer).
-- Optional exact-score bonus predictions for knockout matches (R32+) land in 2d.
+- **Group ranks**: rank all 4 teams in each of the 12 groups via tap-to-swap (tap two teams in the same group to swap their positions). 1st and 2nd score group-stage points; the 3rd team is eligible for wildcard selection.
+- **Wildcards**: pick exactly 8 of the 12 third-place teams. The R32 matchups are looked up from FIFA's official Annexe C table (`src/wildcards-table.js`); the user does not assign slots manually.
+- **Bracket winners**: click a team in each knockout match to advance through R32 → R16 → QF → SF → Final, plus the 3rd-place match. R32 auto-populates from group ranks + wildcards.
+- **Tiebreaker**: predicted average goals per game for the player's predicted champion. The champion is derived from the Final winner pick (`bracket_picks` row for `M104`), not picked separately. Stored as `tiebreaker_picks.champion_avg_goals NUMERIC(4,2)`.
+- Optional exact-score bonus predictions for knockout matches (R32+) land in a later sub-phase.
 
 ## Two-tier save model
 
@@ -46,7 +46,7 @@ All sections open from day 1 and lock at the first WC kickoff on June 11.
 - Group standings: 1 point per correctly placed team (1st or 2nd slot of any group)
 - R32 winner: 2 / R16: 4 / QF: 5 / SF: 8 / Final: 10
 - Exact-score bonus: +2 per knockout match (R32+) where the predicted score matches the actual. **Does NOT apply to group-stage matches.**
-- Tiebreaker: closest guess to the actual champion's total tournament goals (a single integer per player). Compared against reality regardless of which team the player picked to win.
+- Tiebreaker: closest guess to the actual tournament champion's average goals per game (a decimal per player). Compared against reality regardless of which team the player picked to win.
 
 Perfect bracket = 134 points before bonuses. Max with all 32 exact-score bonuses = 198.
 
@@ -54,7 +54,7 @@ Perfect bracket = 134 points before bonuses. Max with all 32 exact-score bonuses
 
 - `index.html` — static shell
 - `app.js` — core logic (picks, lock, leaderboard, bracket)
-- `style.css` — FIFA-inspired dark broadcast palette
+- `style.css` — stadium-green chrome on a vector soccer-pitch background; white card surfaces; bracket connectors in deep green
 - `schema.sql` — Supabase tables and seed data
 - `config.example.js` — credentials template (copy to `config.js`)
 - `config.js` — real credentials (gitignored)

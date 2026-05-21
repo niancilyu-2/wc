@@ -7,57 +7,62 @@ ABOUTME: Static shell; all dynamic content rendered by app.js.
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WC 2026 Bracket</title>
+  <title>2026 World Cup Bracket Challenge</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.2.3/css/flag-icons.min.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header id="site-header">
-    <h1>WC 2026 BRACKET</h1>
+    <h1>2026 World Cup Bracket Challenge</h1>
     <nav class="site-nav">
+      <a href="leaderboard.html">Leaderboard</a>
       <a href="rules.html">Rules &amp; scoring</a>
     </nav>
     <div id="user-bar"></div>
   </header>
 
+  <section id="countdown-banner"></section>
+
   <main>
-    <section id="status-section">
-      <div id="status-bar"></div>
-    </section>
+    <nav id="pick-stepper" class="pick-stepper" aria-label="Pick progress"></nav>
 
-    <section id="groups-section">
-      <h2>Group Stage Picks</h2>
-      <p class="section-help">Rank 1st, 2nd, and 3rd in each group. The 4th team is implied.</p>
+    <section id="groups-section" class="pick-section pick-section--1">
+      <div class="section-head">
+        <h2><span class="step-badge step-badge--1">1</span> Group Stage</h2>
+        <p class="section-help">Tap two teams in a group to swap them. Rank 1st through 4th &mdash; only your 1st and 2nd score points, and your 3rd is eligible for a wildcard slot.</p>
+      </div>
+      <div id="actions-bar" class="actions-bar"></div>
+      <div id="groups-toolbar" class="section-toolbar"></div>
       <div id="groups-grid"></div>
-      <div id="groups-actions" class="picks-controls"></div>
     </section>
 
-    <section id="wildcards-section">
-      <h2>Wildcards — 8 best 3rd-place teams</h2>
-      <p class="section-help">Pick exactly 8 of the 12 third-place teams to advance to the Round of 32.</p>
+    <section id="wildcards-section" class="pick-section pick-section--2">
+      <div class="section-head">
+        <h2><span class="step-badge step-badge--2">2</span> Wildcards &mdash; 8 best 3rd-place teams</h2>
+        <p class="section-help">Pick exactly 8 of the 12 third-place teams to advance to the Round of 32.</p>
+      </div>
+      <div id="wildcards-toolbar" class="section-toolbar"></div>
       <div id="wildcards-grid" class="wildcards-grid"></div>
       <div id="wildcards-status" class="wildcards-status"></div>
     </section>
 
-    <section id="bracket-section">
-      <h2>Knockout Bracket</h2>
-      <p class="section-help">Auto-populates from your group rankings and wildcards. Click winners through to the Final.</p>
+    <section id="bracket-section" class="pick-section pick-section--3">
+      <div class="section-head">
+        <h2><span class="step-badge step-badge--3">3</span> Knockout Bracket</h2>
+        <p class="section-help">Auto-populates from your group rankings and wildcards. Click winners through to the Final.</p>
+      </div>
+      <div id="bracket-toolbar" class="section-toolbar"></div>
       <div id="bracket"></div>
     </section>
 
-    <section id="tiebreaker-section">
-      <h2>Tiebreaker</h2>
-      <p class="section-help">Predict the champion's total goals across the tournament.</p>
+    <section id="tiebreaker-section" class="pick-section pick-section--4">
+      <div class="section-head">
+        <h2><span class="step-badge step-badge--4">4</span> Tiebreaker</h2>
+        <p class="section-help">Predict your champion's average goals per game. Your champion is whoever you pick to win the Final.</p>
+      </div>
       <div id="tiebreaker"></div>
     </section>
-
-    <section id="leaderboard-section">
-      <h2>Leaderboard</h2>
-      <div id="leaderboard"></div>
-    </section>
   </main>
-
-  <div id="global-actions" class="global-actions"></div>
 
   <div id="modal-root"></div>
 

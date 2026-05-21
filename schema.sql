@@ -113,10 +113,13 @@ CREATE TABLE IF NOT EXISTS exact_score_picks (
   PRIMARY KEY (player_id, match_id)
 );
 
--- Tiebreaker: predicted total goals scored by the eventual champion.
+-- Tiebreaker: the player's predicted average goals per game for their
+-- predicted champion (i.e. whichever team they picked to win the Final).
+-- Champion team itself is read from bracket_picks for match M104, so we don't
+-- store it here.
 CREATE TABLE IF NOT EXISTS tiebreaker_picks (
   player_id UUID PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
-  champion_total_goals INT NOT NULL CHECK (champion_total_goals >= 0),
+  champion_avg_goals NUMERIC(4,2) NOT NULL CHECK (champion_avg_goals >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
