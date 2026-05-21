@@ -1416,21 +1416,16 @@ function bracketPairOrder() {
 
 function bracketColumnHTML(round) {
   const pairs = state.bracketPairs?.[round.id] || [];
-  if (round.id === 'final') {
-    return `
-      <div class="bracket-column bracket-column--${round.id}">
-        <header class="bracket-column-header">${round.label}</header>
-        <div class="bracket-column-body">
-          ${pairs.flat().map((id) => matchCellHTML(id)).join('')}
-        </div>
-      </div>`;
-  }
+  // Final has one match; wrap it in a solo .bracket-pair so it gets the same
+  // flex: 1 + space-around centering as every other column's pairs. That puts
+  // M104 at body 50%, which is where the SF pair midpoint also lands.
+  const isFinal = round.id === 'final';
   return `
     <div class="bracket-column bracket-column--${round.id}">
       <header class="bracket-column-header">${round.label}</header>
       <div class="bracket-column-body">
         ${pairs.map((pair) => `
-          <div class="bracket-pair">
+          <div class="bracket-pair${isFinal ? ' bracket-pair--solo' : ''}">
             ${pair.map((id) => matchCellHTML(id)).join('')}
           </div>
         `).join('')}
