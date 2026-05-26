@@ -631,7 +631,7 @@ function groupCardHTML(groupCode) {
 
   let statusLabel;
   if (selectedTeam) {
-    statusLabel = `<strong>↕ ${selectedTeam.code}</strong> selected &mdash; tap any other team to swap.`;
+    statusLabel = `<strong>↕ ${selectedTeam.code}</strong> selected`;
   } else {
     statusLabel = 'Tap two teams to swap their positions.';
   }
@@ -1018,7 +1018,7 @@ function renderGroupsToolbar() {
   const allRanked = state.groups.every((g) => hasGroupPick(g.code));
   el.innerHTML = `
     <button type="button" class="btn-secondary" id="auto-pick-groups-btn" ${allRanked ? 'disabled' : ''} title="${allRanked ? 'All groups already ranked' : 'Fill any groups you haven\'t ranked with a random order'}">🎲 Auto pick</button>
-    <button type="button" class="btn-link" id="clear-picks-btn">🗑 Clear my picks</button>
+    <button type="button" class="btn-link" id="clear-picks-btn">🗑️ Clear my picks</button>
   `;
 }
 
@@ -1035,7 +1035,7 @@ function renderWildcardsToolbar() {
     : count >= 8 ? 'All 8 wildcards picked' : `Randomly fill the remaining ${8 - count} wildcard slot${8 - count === 1 ? '' : 's'}`;
   el.innerHTML = `
     <button type="button" class="btn-secondary" id="auto-pick-wildcards-btn" ${canAutoPick ? '' : 'disabled'} title="${title}">🎲 Auto pick</button>
-    <button type="button" class="btn-link" id="clear-wildcards-btn" ${canClear ? '' : 'disabled'}>🗑 Clear my picks</button>
+    <button type="button" class="btn-link" id="clear-wildcards-btn" ${canClear ? '' : 'disabled'}>🗑️ Clear my picks</button>
   `;
 }
 
@@ -1056,7 +1056,7 @@ function renderBracketToolbar() {
     : 'Randomly pick a winner for every empty match';
   el.innerHTML = `
     <button type="button" class="btn-secondary" id="auto-pick-bracket-btn" ${canAutoPick ? '' : 'disabled'} title="${title}">🎲 Auto pick</button>
-    <button type="button" class="btn-link" id="clear-bracket-btn" ${hasPicked ? '' : 'disabled'}>🗑 Clear my picks</button>
+    <button type="button" class="btn-link" id="clear-bracket-btn" ${hasPicked ? '' : 'disabled'}>🗑️ Clear my picks</button>
   `;
 }
 
@@ -1490,7 +1490,13 @@ function wireBracketListener() {
 function renderUserBar() {
   const bar = document.getElementById('user-bar');
   bar.innerHTML = `
-    <span class="user-name">${state.player.name}</span>
+    <span class="user-id">
+      <svg class="user-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="8" cy="5.5" r="2.5" />
+        <path d="M3 14 C3 11 5 9.5 8 9.5 C11 9.5 13 11 13 14" />
+      </svg>
+      <span class="user-name">${state.player.name}</span>
+    </span>
     <button id="switch-user" class="link-button">switch</button>
   `;
   document.getElementById('switch-user').addEventListener('click', () => {
