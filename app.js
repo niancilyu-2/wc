@@ -27,6 +27,10 @@ function blankPicks() {
 
 const state = {
   player: null,
+  // When set, the page is in read-only "view another player's picks" mode.
+  // `picks` holds the viewed player's snapshot; `state.player` still holds the
+  // current user so the header bar / nav identity stays correct.
+  viewedPlayer: null,
   groups: [],
   teams: [],
   matches: [],
@@ -72,16 +76,22 @@ function isLocked() {
   return new Date() >= new Date(LOCK_DATE_ISO);
 }
 
+function isViewing() {
+  return !!state.viewedPlayer;
+}
+
 function isSubmitted() {
   return !!state.player?.groups_submitted_at && !!state.player?.bracket_submitted_at;
 }
 
-// Edits are disabled when locked OR when the player has submitted (until Edit).
+// Edits are disabled when locked, when the player has submitted (until Edit),
+// or when viewing another player's picks in read-only mode.
 function isEditingDisabled() {
-  return isLocked() || isSubmitted();
+  return isLocked() || isSubmitted() || isViewing();
 }
 
 function isDirty() {
+  if (isViewing()) return false;
   return JSON.stringify(state.picks.draft) !== JSON.stringify(state.picks.saved);
 }
 
@@ -288,11 +298,22 @@ async function loadCurrentPlayer() {
   state.player = { ...state.player, ...data };
 }
 
-async function loadMyPicks() {
+async function loadViewedPlayer(playerId) {
+  const { data, error } = await supabase
+    .from('players')
+    .select('id, name, groups_submitted_at, bracket_submitted_at')
+    .eq('id', playerId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
+
+async function loadMyPicks(playerId) {
+  const id = playerId || state.player.id;
   const [groupRes, brktRes, tbRes] = await Promise.all([
-    supabase.from('group_picks').select('*').eq('player_id', state.player.id),
-    supabase.from('bracket_picks').select('*').eq('player_id', state.player.id),
-    supabase.from('tiebreaker_picks').select('*').eq('player_id', state.player.id).maybeSingle(),
+    supabase.from('group_picks').select('*').eq('player_id', id),
+    supabase.from('bracket_picks').select('*').eq('player_id', id),
+    supabase.from('tiebreaker_picks').select('*').eq('player_id', id).maybeSingle(),
   ]);
   const saved = blankPicks();
   if (!groupRes.error) {
@@ -985,6 +1006,12 @@ function renderActionsBar() {
   const submitted = isSubmitted();
   const dirty = isDirty();
 
+  if (isViewing()) {
+    bar.innerHTML = `
+      <a class="btn-secondary" href="leaderboard.html">← Back to leaderboard</a>
+    `;
+    return;
+  }
   if (locked) {
     bar.innerHTML = `
       <span class="status-pill submitted">Picks are locked.</span>
@@ -1046,6 +1073,7 @@ function renderAll() {
   state.selection = null;
   seedStageProgress();
   renderUserBar();
+  renderViewBanner();
   renderCountdownBanner();
   renderGroupPicks();
   renderActionsBar();
@@ -1058,12 +1086,41 @@ function renderAll() {
   updateNavigationGuards();
 }
 
+function renderViewBanner() {
+  const el = document.getElementById('view-banner');
+  if (!el) return;
+  if (!isViewing()) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const name = state.viewedPlayer.name;
+  const safeName = name
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const note = isLocked()
+    ? ''
+    : '<span class="view-banner-note">· Other players\' picks are normally hidden until first kickoff</span>';
+  el.hidden = false;
+  el.innerHTML = `
+    <div class="view-banner-row">
+      <span class="view-banner-eye" aria-hidden="true">👁</span>
+      <span class="view-banner-text">
+        Viewing <strong>${safeName}</strong>'s picks
+        <span class="view-banner-readonly">· read only</span>
+        ${note}
+      </span>
+      <a class="view-banner-back" href="leaderboard.html">← Back to leaderboard</a>
+    </div>
+  `;
+}
+
 // ---------- Per-section toolbars (Auto pick / Clear) ----------
 
 function renderGroupsToolbar() {
   const el = document.getElementById('groups-toolbar');
   if (!el) return;
-  if (isLocked() || isSubmitted()) { el.innerHTML = ''; return; }
+  if (isEditingDisabled()) { el.innerHTML = ''; return; }
   const allRanked = state.groups.every((g) => hasGroupPick(g.code));
   el.innerHTML = `
     <button type="button" class="btn-secondary" id="auto-pick-groups-btn" ${allRanked ? 'disabled' : ''} title="${allRanked ? 'All groups already ranked' : 'Fill any groups you haven\'t ranked with a random order'}">🎲 Auto pick</button>
@@ -1074,7 +1131,7 @@ function renderGroupsToolbar() {
 function renderWildcardsToolbar() {
   const el = document.getElementById('wildcards-toolbar');
   if (!el) return;
-  if (isLocked() || isSubmitted()) { el.innerHTML = ''; return; }
+  if (isEditingDisabled()) { el.innerHTML = ''; return; }
   const groupsReady = state.groups.every((g) => hasGroupPick(g.code));
   const count = advancingGroups().length;
   const canAutoPick = groupsReady && count < 8;
@@ -1091,7 +1148,7 @@ function renderWildcardsToolbar() {
 function renderBracketToolbar() {
   const el = document.getElementById('bracket-toolbar');
   if (!el) return;
-  if (isLocked() || isSubmitted()) { el.innerHTML = ''; return; }
+  if (isEditingDisabled()) { el.innerHTML = ''; return; }
   const groupsReady = state.groups.every((g) => hasGroupPick(g.code));
   const wildcardsReady = advancingGroups().length === 8;
   const ko = bracketMatches();
@@ -1276,6 +1333,7 @@ function renderTiebreaker() {
 
 function shouldWarnOnLeave() {
   if (isLocked()) return false;
+  if (isViewing()) return false;
   return isDirty() || !isSubmitted();
 }
 
@@ -1662,6 +1720,11 @@ function tickCountdown() {
 }
 
 function progressLineHTML() {
+  if (isViewing()) {
+    const safeName = state.viewedPlayer.name
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="countdown-progress">Status: <span class="dim">Viewing ${safeName} (read-only)</span></div>`;
+  }
   const dirty = isDirty();
   const submitted = isSubmitted();
   let saveStateLabel;
@@ -1890,13 +1953,29 @@ function startCountdownTicker() {
 // ---------- Init ----------
 
 async function init() {
+  const viewId = new URL(location.href).searchParams.get('view');
+
   let player = getStoredPlayer();
   if (!player) player = await showPlayerPicker();
   state.player = player;
 
   renderUserBar();
   await Promise.all([loadReferenceData(), loadCurrentPlayer()]);
-  await loadMyPicks();
+
+  if (viewId && viewId !== state.player.id) {
+    const viewed = await loadViewedPlayer(viewId);
+    if (viewed) {
+      state.viewedPlayer = viewed;
+      await loadMyPicks(viewed.id);
+    } else {
+      // Unknown player id: fall back to the current user's own picks rather
+      // than landing on a blank board.
+      await loadMyPicks();
+    }
+  } else {
+    await loadMyPicks();
+  }
+
   renderAll();
   initCollapsedSections();
   wireGroupsGrid();
