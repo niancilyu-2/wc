@@ -43,10 +43,11 @@ All sections open from day 1 and lock at the first WC kickoff on June 11.
 ## Scoring (final)
 
 - Group standings: 1 point per correctly placed team (1st or 2nd slot of any group)
+- Wildcards: 1 point for each group the player flagged as advancing whose 3rd-place team actually advanced (max 8, since the player picks 8 of 12)
 - R32 winner: 2 / R16: 4 / QF: 5 / SF: 8 / Final: 10
 - Tiebreaker: closest guess to the actual tournament champion's average goals per game (a decimal per player). Compared against reality regardless of which team the player picked to win.
 
-Perfect bracket = 134 points.
+Perfect bracket = 142 points.
 
 ## Files
 

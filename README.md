@@ -25,12 +25,13 @@ Picks live in a **draft** until you commit them. **Save my picks** writes the dr
 | Round | Points each | Picks | Subtotal |
 |---|---:|---:|---:|
 | Group standings (1st or 2nd of any group) | 1 | 24 | 24 |
+| Wildcards (3rd-place team you flagged actually advances) | 1 | 8 | 8 |
 | R32 winner | 2 | 16 | 32 |
 | R16 winner | 4 | 8 | 32 |
 | QF winner | 5 | 4 | 20 |
 | SF winner | 8 | 2 | 16 |
 | Final winner | 10 | 1 | 10 |
-| **Perfect bracket** | | | **134** |
+| **Perfect bracket** | | | **142** |
 
 Tiebreaker: closest guess to the actual champion's real average goals per game wins, regardless of which team the player picked.
 
