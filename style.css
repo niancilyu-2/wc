@@ -1291,10 +1291,12 @@ main > * { min-width: 0; }
   display: flex;
   flex-direction: column;
   flex: 1;
-  /* No gap between pairs — pairs fill the body via flex: 1, and any added
-     gap would shrink pair height and skew the pair-midpoint geometry that
-     the connector lines depend on. */
-  gap: 0;
+  /* Same gap value as .bracket-pair so every adjacent match (within a pair or
+     across a pair boundary) has equal daylight. This keeps the connector
+     geometry intact: when intra-pair and inter-pair gaps match, the pair
+     midpoint still lands exactly between its two match centers, which is
+     where the next column's match center also sits. */
+  gap: 2rem;
   min-height: 0;
 }
 
