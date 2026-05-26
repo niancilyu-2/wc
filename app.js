@@ -1385,13 +1385,6 @@ function matchCellHTML(matchId) {
       </button>`;
   };
 
-  const winnerTeam = result ? state.teamsByCode[result.winner] : null;
-  const resultBand = result ? `
-    <div class="match-result">
-      <span class="match-score">${result.score}</span>
-      ${winnerTeam ? `<span class="match-result-winner">${flagHTML(winnerTeam.code)}<span>${winnerTeam.name}</span></span>` : ''}
-    </div>` : '';
-
   return `
     <div class="bracket-match${result ? ' is-played' : ''}" data-match-id="${matchId}">
       <div class="bracket-match-meta">
@@ -1401,7 +1394,6 @@ function matchCellHTML(matchId) {
       ${stadium ? `<div class="bracket-match-venue" title="${match.venue}">${stadium}${city ? ` &middot; ${city}` : ''}</div>` : ''}
       ${slotHTML('a', teamA)}
       ${slotHTML('b', teamB)}
-      ${resultBand}
       ${dest ? `<div class="bracket-feed">winner &rarr; <strong>#${dest.slice(1)}</strong></div>` : ''}
     </div>`;
 }
