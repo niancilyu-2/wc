@@ -68,23 +68,35 @@ ABOUTME: Static shell; all dynamic content rendered by app.js.
 
     <div id="actions-bar" class="actions-bar"></div>
 
-    <section id="groups-section" class="pick-section pick-section--1">
+    <section id="groups-section" class="pick-section pick-section--1 is-collapsible">
       <div class="section-head">
         <h2><span class="step-badge step-badge--1">1</span> Group Stage</h2>
         <p class="section-help">Tap two teams in a group to swap them. Rank 1st through 4th &mdash; only your 1st and 2nd score points, and your 3rd is eligible for a wildcard slot.</p>
+        <button class="section-toggle" type="button" aria-expanded="true" aria-controls="groups-body">
+          <span class="section-toggle-summary" data-summary-for="groups"></span>
+          <span class="section-toggle-caret" aria-hidden="true">▾</span>
+        </button>
       </div>
-      <div id="groups-toolbar" class="section-toolbar"></div>
-      <div id="groups-grid"></div>
+      <div id="groups-body" class="section-body">
+        <div id="groups-toolbar" class="section-toolbar"></div>
+        <div id="groups-grid"></div>
+      </div>
     </section>
 
-    <section id="wildcards-section" class="pick-section pick-section--2">
+    <section id="wildcards-section" class="pick-section pick-section--2 is-collapsible">
       <div class="section-head">
         <h2><span class="step-badge step-badge--2">2</span> Wildcards &mdash; 8 best 3rd-place teams</h2>
         <p class="section-help">Pick exactly 8 of the 12 third-place teams to advance to the Round of 32.</p>
+        <button class="section-toggle" type="button" aria-expanded="true" aria-controls="wildcards-body">
+          <span class="section-toggle-summary" data-summary-for="wildcards"></span>
+          <span class="section-toggle-caret" aria-hidden="true">▾</span>
+        </button>
       </div>
-      <div id="wildcards-toolbar" class="section-toolbar"></div>
-      <div id="wildcards-grid" class="wildcards-grid"></div>
-      <div id="wildcards-status" class="wildcards-status"></div>
+      <div id="wildcards-body" class="section-body">
+        <div id="wildcards-toolbar" class="section-toolbar"></div>
+        <div id="wildcards-grid" class="wildcards-grid"></div>
+        <div id="wildcards-status" class="wildcards-status"></div>
+      </div>
     </section>
 
     <section id="bracket-section" class="pick-section pick-section--3">

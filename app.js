@@ -7,6 +7,7 @@ import { lookupAssignment } from './src/wildcards.js';
 // until the first WC kickoff on June 11.
 const LOCK_DATE_ISO = '2026-06-11T13:00:00-06:00'; // Mexico vs South Africa
 const STORAGE_KEY_PLAYER = 'wcbracket.player';
+const STORAGE_KEY_COLLAPSED = 'wcbracket.collapsed'; // JSON: { groups: bool, wildcards: bool }
 const FINAL_MATCH_ID = 'M104';
 
 const supabase = window.supabase.createClient(
@@ -652,6 +653,7 @@ function renderGroupCard(groupCode) {
   wrapper.innerHTML = groupCardHTML(groupCode);
   existing.replaceWith(wrapper.firstElementChild);
   renderGroupsToolbar();
+  renderSectionToggle('groups');
 }
 
 // Briefly flash the two rows that just swapped so the change registers.
@@ -670,6 +672,7 @@ function renderGroupPicks() {
   const grid = document.getElementById('groups-grid');
   grid.innerHTML = state.groups.map((g) => groupCardHTML(g.code)).join('');
   renderGroupsToolbar();
+  renderSectionToggle('groups');
 }
 
 function wireGroupsGrid() {
@@ -738,6 +741,7 @@ function renderWildcardsSection() {
     `;
     document.getElementById('wildcards-status').textContent = '';
     renderWildcardsToolbar();
+    renderSectionToggle('wildcards');
     return;
   }
 
@@ -769,6 +773,7 @@ function renderWildcardsSection() {
     ${count === 8 ? '<span class="wildcards-ready">✓ Bracket ready</span>' : ''}
   `;
   renderWildcardsToolbar();
+  renderSectionToggle('wildcards');
 }
 
 function wireWildcards() {
@@ -1591,6 +1596,103 @@ function renderCountdownBanner() {
   renderStepper();
 }
 
+// ---------- Section collapse (Groups + Wildcards) ----------
+
+const COLLAPSIBLE_SECTIONS = ['groups', 'wildcards'];
+
+function readCollapsedPrefs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_COLLAPSED);
+    if (!raw) return {};
+    const v = JSON.parse(raw);
+    return (v && typeof v === 'object') ? v : {};
+  } catch { return {}; }
+}
+
+function writeCollapsedPref(key, collapsed) {
+  const prefs = readCollapsedPrefs();
+  prefs[key] = !!collapsed;
+  try { localStorage.setItem(STORAGE_KEY_COLLAPSED, JSON.stringify(prefs)); } catch {}
+}
+
+function sectionElForKey(key) {
+  return document.getElementById(`${key}-section`);
+}
+
+function isSectionComplete(key) {
+  if (key === 'groups') return isGroupsComplete();
+  if (key === 'wildcards') return isWildcardsComplete();
+  return false;
+}
+
+function sectionSummaryText(key) {
+  if (key === 'groups') {
+    const done = groupsRankedCount();
+    const total = state.groups.length || 12;
+    return done === total ? `✓ All ${total} groups ranked` : `${done} of ${total} groups ranked`;
+  }
+  if (key === 'wildcards') {
+    const done = advancingGroups().length;
+    return done === 8 ? `✓ 8 wildcards picked` : `${done} of 8 wildcards picked`;
+  }
+  return '';
+}
+
+function setSectionCollapsed(key, collapsed) {
+  const section = sectionElForKey(key);
+  if (!section) return;
+  section.classList.toggle('is-collapsed', !!collapsed);
+  const btn = section.querySelector('.section-toggle');
+  if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function renderSectionToggle(key) {
+  const section = sectionElForKey(key);
+  if (!section) return;
+  const summarySpan = section.querySelector(`.section-toggle-summary[data-summary-for="${key}"]`);
+  if (!summarySpan) return;
+  const text = sectionSummaryText(key);
+  summarySpan.textContent = text;
+  summarySpan.classList.toggle('is-complete', isSectionComplete(key));
+}
+
+function initCollapsedSections() {
+  const prefs = readCollapsedPrefs();
+  for (const key of COLLAPSIBLE_SECTIONS) {
+    renderSectionToggle(key);
+    const collapsed = (key in prefs) ? !!prefs[key] : isSectionComplete(key);
+    setSectionCollapsed(key, collapsed);
+  }
+}
+
+function wireSectionToggles() {
+  document.querySelector('main')?.addEventListener('click', (e) => {
+    // Stepper anchor → ensure target section is expanded before scroll lands.
+    const step = e.target.closest('.step');
+    if (step) {
+      const href = step.getAttribute('href') || '';
+      const id = href.startsWith('#') ? href.slice(1) : '';
+      const key = id === 'groups-section' ? 'groups' : id === 'wildcards-section' ? 'wildcards' : null;
+      if (key) {
+        setSectionCollapsed(key, false);
+        writeCollapsedPref(key, false);
+      }
+      return;
+    }
+    // Section header collapse toggle.
+    const toggle = e.target.closest('.section-toggle');
+    if (!toggle) return;
+    const section = toggle.closest('.pick-section');
+    if (!section) return;
+    const id = section.id;
+    const key = id === 'groups-section' ? 'groups' : id === 'wildcards-section' ? 'wildcards' : null;
+    if (!key) return;
+    const willCollapse = !section.classList.contains('is-collapsed');
+    setSectionCollapsed(key, willCollapse);
+    writeCollapsedPref(key, willCollapse);
+  });
+}
+
 function renderStepper() {
   const el = document.getElementById('pick-stepper');
   if (!el) return;
@@ -1670,11 +1772,13 @@ async function init() {
   await Promise.all([loadReferenceData(), loadCurrentPlayer()]);
   await loadMyPicks();
   renderAll();
+  initCollapsedSections();
   wireGroupsGrid();
   wireWildcards();
   wireBracketListener();
   wireActionsBar();
   wireSectionToolbars();
+  wireSectionToggles();
   wireInternalLinkGuards();
   startCountdownTicker();
 }

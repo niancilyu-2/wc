@@ -322,6 +322,60 @@ main > * { min-width: 0; }
   max-width: 64ch;
 }
 
+/* ---- Collapsible sections (Groups + Wildcards) ---- */
+
+.is-collapsible .section-head {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.is-collapsible .section-head h2 { flex: 1 1 auto; }
+.is-collapsible .section-head .section-help { flex-basis: 100%; }
+
+.section-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.section-toggle:hover,
+.section-toggle:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}
+
+.section-toggle-summary {
+  font: 600 0.72rem var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.section-toggle-summary.is-complete { color: var(--winner); }
+
+.section-toggle-caret {
+  display: inline-block;
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: transform 140ms ease;
+}
+
+.pick-section.is-collapsed .section-toggle-caret { transform: rotate(-90deg); }
+.pick-section.is-collapsed .section-help,
+.pick-section.is-collapsed .section-body { display: none; }
+.pick-section.is-collapsed { padding-bottom: 1.1rem; }
+
 /* ---- Countdown banner — split-flap arrivals board ---- */
 
 #countdown-banner {
