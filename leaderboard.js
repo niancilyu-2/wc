@@ -5,16 +5,68 @@
   const STORAGE_KEY_PLAYER = 'wcbracket.player';
 
   const MOCK = [
-    { rank: 1,  name: 'Reid',    champion: { code: 'br',     name: 'Brazil' },      points: 142, tiebreaker: 2.4 },
-    { rank: 2,  name: 'Nianci',  champion: { code: 'fr',     name: 'France' },      points: 138, tiebreaker: 1.8 },
-    { rank: 3,  name: 'Alex',    champion: { code: 'ar',     name: 'Argentina' },   points: 131, tiebreaker: 2.1 },
-    { rank: 4,  name: 'Sam',     champion: { code: 'es',     name: 'Spain' },       points: 124, tiebreaker: 2.0 },
-    { rank: 5,  name: 'Jordan',  champion: { code: 'br',     name: 'Brazil' },      points: 118, tiebreaker: 2.5 },
-    { rank: 6,  name: 'Casey',   champion: { code: 'pt',     name: 'Portugal' },    points: 112, tiebreaker: 1.9 },
-    { rank: 7,  name: 'Priya',   champion: { code: 'gb-eng', name: 'England' },     points: 108, tiebreaker: 1.7 },
-    { rank: 8,  name: 'Dosan',   champion: { code: 'de',     name: 'Germany' },     points: 99,  tiebreaker: 1.5 },
-    { rank: 9,  name: 'Maria',   champion: { code: 'nl',     name: 'Netherlands' }, points: 88,  tiebreaker: 2.2 },
-    { rank: 10, name: 'Tomás',   champion: { code: 'ar',     name: 'Argentina' },   points: 76,  tiebreaker: 1.9 },
+    {
+      rank: 1, name: 'Reid', champion: { code: 'br', name: 'Brazil' },
+      points: 142, tiebreaker: 2.4,
+      breakdown: { groups: 19, r32: 26, r16: 24, qf: 15, sf: 16, final: 10, bonus: 32 },
+    },
+    {
+      rank: 2, name: 'Nianci', champion: { code: 'fr', name: 'France' },
+      points: 138, tiebreaker: 1.8,
+      breakdown: { groups: 21, r32: 24, r16: 20, qf: 20, sf: 16, final: 10, bonus: 27 },
+    },
+    {
+      rank: 3, name: 'Alex', champion: { code: 'ar', name: 'Argentina' },
+      points: 131, tiebreaker: 2.1,
+      breakdown: { groups: 18, r32: 22, r16: 20, qf: 15, sf: 16, final: 10, bonus: 30 },
+    },
+    {
+      rank: 4, name: 'Sam', champion: { code: 'es', name: 'Spain' },
+      points: 124, tiebreaker: 2.0,
+      breakdown: { groups: 17, r32: 22, r16: 20, qf: 15, sf: 16, final: 10, bonus: 24 },
+    },
+    {
+      rank: 5, name: 'Jordan', champion: { code: 'br', name: 'Brazil' },
+      points: 118, tiebreaker: 2.5,
+      breakdown: { groups: 16, r32: 20, r16: 16, qf: 15, sf: 16, final: 10, bonus: 25 },
+    },
+    {
+      rank: 6, name: 'Casey', champion: { code: 'pt', name: 'Portugal' },
+      points: 112, tiebreaker: 1.9,
+      breakdown: { groups: 16, r32: 20, r16: 16, qf: 15, sf: 16, final: 10, bonus: 19 },
+    },
+    {
+      rank: 7, name: 'Priya', champion: { code: 'gb-eng', name: 'England' },
+      points: 108, tiebreaker: 1.7,
+      breakdown: { groups: 15, r32: 18, r16: 16, qf: 15, sf: 16, final: 10, bonus: 18 },
+    },
+    {
+      rank: 8, name: 'Dosan', champion: { code: 'de', name: 'Germany' },
+      points: 99, tiebreaker: 1.5,
+      breakdown: { groups: 14, r32: 18, r16: 12, qf: 10, sf: 16, final: 10, bonus: 19 },
+    },
+    {
+      rank: 9, name: 'Maria', champion: { code: 'nl', name: 'Netherlands' },
+      points: 88, tiebreaker: 2.2,
+      breakdown: { groups: 13, r32: 16, r16: 12, qf: 10, sf: 16, final: 0, bonus: 21 },
+    },
+    {
+      rank: 10, name: 'Tomás', champion: { code: 'ar', name: 'Argentina' },
+      points: 76, tiebreaker: 1.9,
+      breakdown: { groups: 12, r32: 14, r16: 12, qf: 10, sf: 8, final: 10, bonus: 10 },
+    },
+  ];
+
+  // Each stage row in the breakdown popover. Order is the same order results
+  // come in during the tournament; "max" is the worst-case earned for that
+  // stage so users can read "19/24" as a fraction.
+  const BREAKDOWN_ROWS = [
+    { key: 'groups', label: 'Group standings', max: 24 },
+    { key: 'r32',    label: 'R32 winners',     max: 32 },
+    { key: 'r16',    label: 'R16 winners',     max: 32 },
+    { key: 'qf',     label: 'Quarterfinals',   max: 20 },
+    { key: 'sf',     label: 'Semifinals',      max: 16 },
+    { key: 'final',  label: 'Final',           max: 10 },
   ];
 
   const root = document.getElementById('leaderboard');
@@ -44,6 +96,30 @@
     </table>
   `;
 
+  function breakdownHTML(p) {
+    const b = p.breakdown;
+    if (!b) return '';
+    const rows = BREAKDOWN_ROWS.map((r) => `
+      <div class="lb-bd-row">
+        <span class="lb-bd-label">${r.label}</span>
+        <span class="lb-bd-val">${b[r.key]} <span class="lb-bd-max">/ ${r.max}</span></span>
+      </div>
+    `).join('');
+    return `
+      <div class="lb-breakdown" role="tooltip">
+        <div class="lb-bd-title">Score breakdown</div>
+        ${rows}
+        <div class="lb-bd-row lb-bd-bonus">
+          <span class="lb-bd-label">Exact-score bonus</span>
+          <span class="lb-bd-val">+${b.bonus}</span>
+        </div>
+        <div class="lb-bd-total">
+          <span>Total</span>
+          <span>${p.points}</span>
+        </div>
+      </div>`;
+  }
+
   function rowHTML(p, myNameLower) {
     const isLeader = p.rank === 1;
     const isMe = myNameLower && p.name.toLowerCase() === myNameLower;
@@ -60,7 +136,10 @@
           <span class="fi fi-${p.champion.code} lb-flag" aria-hidden="true"></span>
           <span class="lb-champ-name">${escapeHtml(p.champion.name)}</span>
         </td>
-        <td class="lb-col-pts">${p.points}</td>
+        <td class="lb-col-pts" tabindex="0" aria-label="${p.points} points — hover or focus for breakdown">
+          <span class="lb-pts-total">${p.points}</span>
+          ${breakdownHTML(p)}
+        </td>
         <td class="lb-col-tb">${p.tiebreaker.toFixed(1)} <span class="lb-tb-unit">g/g</span></td>
       </tr>
     `;

@@ -1719,6 +1719,96 @@ main > * { min-width: 0; }
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.lb-col-pts:focus-visible {
+  background: var(--accent-soft);
+}
+
+/* Per-stage breakdown popover anchored to the points cell. CSS-only reveal
+   via :hover / :focus-within so the keyboard / mobile-tap paths work without
+   any JS. */
+.lb-breakdown {
+  position: absolute;
+  right: calc(100% + 0.6rem);
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  width: 240px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem 0.65rem;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 0.8rem;
+  letter-spacing: 0;
+  color: var(--text);
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 30;
+  white-space: normal;
+}
+
+.lb-col-pts:hover .lb-breakdown,
+.lb-col-pts:focus-within .lb-breakdown {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.lb-bd-title {
+  font: 700 0.7rem var(--font-display);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.45rem;
+}
+
+.lb-bd-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.2rem 0;
+}
+
+.lb-bd-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.lb-bd-val {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lb-bd-max {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.lb-bd-bonus .lb-bd-val { color: var(--winner); }
+
+.lb-bd-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 0.9rem;
 }
 
 .lb-col-tb {
@@ -1757,6 +1847,18 @@ main > * { min-width: 0; }
   .lb-flag { margin-right: 0; }
   .lb-tb-unit { display: none; }
   .lb-col-tb { width: 4rem; }
+
+  .lb-breakdown {
+    right: 0;
+    left: auto;
+    top: calc(100% + 0.4rem);
+    transform: translateY(-4px);
+    width: min(240px, calc(100vw - 2rem));
+  }
+  .lb-col-pts:hover .lb-breakdown,
+  .lb-col-pts:focus-within .lb-breakdown {
+    transform: translateY(0);
+  }
 }
 
 /* ---- Footer signature ---- */
