@@ -51,8 +51,12 @@ Perfect bracket = 142 points.
 
 ## Files
 
-- `index.html` — static shell
-- `app.js` — core logic (picks, lock, leaderboard, bracket)
+- `index.html` — static shell (picks page; supports `?view=<player_id>` for read-only viewing of another player)
+- `app.js` — core logic (picks, lock, bracket cascade, view-only mode)
+- `leaderboard.html` / `leaderboard.js` — Supabase-backed standings; uses `src/scoring.js`
+- `livescores.html` / `livescores.js` — schedule + live scores, overlays MOCK_TOURNAMENT until Phase 4
+- `admin.html` / `admin.js` — admin-only results-entry page (not in nav); gated by ADMIN_CODE
+- `src/scoring.js` — pure scoring engine (tested in `tests/scoring.test.js`)
 - `style.css` — stadium-green chrome on a vector soccer-pitch background; white card surfaces; bracket connectors in deep green
 - `schema.sql` — Supabase tables and seed data
 - `config.example.js` — credentials template (copy to `config.js`)
